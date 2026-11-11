@@ -1,0 +1,8 @@
+# Existing Nginx terminates HTTPS; the application stays on loopback.
+services:
+  app:
+    environment:
+      COOKIE_SECURE: "true"
+      PUBLIC_ORIGIN: "https://${SITE_DOMAIN:?Set SITE_DOMAIN in .env first}"
+      NODE_OPTIONS: --max-old-space-size=128
+    mem_limit: 384m

@@ -1,0 +1,33 @@
+[Unit]
+Description=Our Garden consistent SQLite backup (native Node)
+After=our-garden.service
+
+[Service]
+Type=oneshot
+User=ourgarden
+Group=ourgarden
+WorkingDirectory=/opt/our-garden
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=64
+Environment=DATA_DIR=/var/lib/our-garden
+Environment=BACKUP_DIR=/var/lib/our-garden/backups
+Environment=BACKUP_KEEP=14
+ExecStart=/opt/our-garden-runtime/bin/node /opt/our-garden/scripts/backup.mjs
+TimeoutStartSec=120s
+UMask=0077
+StateDirectory=our-garden
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/our-garden
+CapabilityBoundingSet=
+MemoryAccounting=true
+MemoryMax=192M
+CPUQuota=50%
+Nice=10
+TasksMax=50
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=our-garden-backup

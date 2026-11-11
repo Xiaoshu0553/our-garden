@@ -47,7 +47,144 @@ node --test
 
 Linux/macOS 示例：`PORT=3100 node server.mjs`。PowerShell 示例：`$env:PORT='3100'`，再执行 `node server.mjs`。
 
-## Ubuntu 服务器部署
+## 当前生产部署：Node.js + systemd + 现有 Nginx
+
+本次服务器使用原生 Node.js 运行，由 systemd 管理，复用服务器已有的 Nginx 提供 HTTPS。Docker 仍可作为其他环境的可选部署方式，见后续章节。
+
+| 位置或设置 | 生产值 |
+| --- | --- |
+| 访问地址 | `https://cyberhome.wuhuxiaoshu.com` |
+| 应用源码 | `/opt/our-garden` |
+| Node.js | 官方 `v24.22.2` Linux x64，已核对发行包 SHA256 |
+| Node 可执行文件 | `/opt/our-garden-runtime/bin/node` |
+| 运行用户和组 | `ourgarden`，系统账号，禁止交互登录 |
+| 私有数据目录 | `/var/lib/our-garden`，权限 `0700` |
+| 数据库 | `/var/lib/our-garden/garden.sqlite` |
+| 备份 | `/var/lib/our-garden/backups`，保留最近 14 份成功快照 |
+| 应用监听 | 仅 `127.0.0.1:3000`，由已有 Nginx 反向代理 |
+| 应用服务 | `our-garden.service`，开机启动，异常退出后重启 |
+| 资源上限 | 应用内存 `384M`，V8 heap `128MB`，最多一个 CPU 核心时间 |
+
+运行时可以从 [Node.js 官方发行目录](https://nodejs.org/dist/latest-v24.x/) 安装；更新运行时也应先校验对应的 `SHASUMS256.txt`。源码、运行时和数据目录独立，更新源码不会清空数据。应用不需要 `npm install` 或构建步骤。
+
+### 服务安装与启动
+
+以下是原生方式的安装命令，在普通 SSH 终端中以 root 执行。先确认官方 Node 已安装到上述路径、源码已放入 `/opt/our-garden`，并创建运行账号与私有目录：
+
+```sh
+getent group ourgarden >/dev/null || groupadd --system ourgarden
+id -u ourgarden >/dev/null 2>&1 || useradd --system --gid ourgarden --home-dir /var/lib/our-garden --shell /usr/sbin/nologin ourgarden
+install -d -o ourgarden -g ourgarden -m 0700 /var/lib/our-garden
+```
+
+安装应用服务、原生备份服务与定时器。原生备份模板的源文件带 `.native`，安装时使用定时器对应的标准服务名；不要同时启用 Docker 版备份服务：
+
+```sh
+cd /opt/our-garden
+install -m 0644 deploy/our-garden.service /etc/systemd/system/our-garden.service
+install -m 0644 deploy/our-garden-backup.native.service /etc/systemd/system/our-garden-backup.service
+install -m 0644 deploy/our-garden-backup.timer /etc/systemd/system/our-garden-backup.timer
+systemd-analyze verify /etc/systemd/system/our-garden.service /etc/systemd/system/our-garden-backup.service /etc/systemd/system/our-garden-backup.timer
+systemctl daemon-reload
+systemctl enable --now our-garden.service
+curl --fail --silent --show-error http://127.0.0.1:3000/healthz
+```
+
+应用和备份均以非 root 账号运行，服务只允许写入 `/var/lib/our-garden`；源码和运行时保持只读。文件系统保护和权限配置参考 [Ubuntu systemd 执行环境说明](https://manpages.ubuntu.com/manpages/jammy/man5/systemd.exec.5.html)，资源限制参考 [资源控制说明](https://manpages.ubuntu.com/manpages/jammy/man5/systemd.resource-control.5.html)。
+
+### 两人的账号与初始凭据
+
+网页没有公开注册。以运行账号执行账号工具，并显式指定生产数据目录：
+
+```sh
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/scripts/accounts.mjs
+```
+
+需要无人值守初始化时，用下面的方式分别创建两人。示例昵称可以替换，最多两个账号：
+
+```sh
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/scripts/accounts.mjs --name '你' --generate /var/lib/our-garden/accounts.credentials.local
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/scripts/accounts.mjs --name 'TA' --generate /var/lib/our-garden/accounts.credentials.local
+```
+
+生成的随机密码只写入私有凭据文件，不显示在终端或服务日志中。通过受信任的 SSH 通道取出并分别交给本人；首次登录后，可在“我的设置”修改昵称和密码。取用后的初始明文凭据文件可以删除，数据库继续保留密码散列；不将凭据放进源码、发布包或公开网页。
+
+需要重置账号时运行交互工具，避免在命令行参数中放入新密码：
+
+```sh
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/scripts/accounts.mjs --reset --name '要重置的昵称'
+```
+
+### HTTPS 与登录访问源
+
+本次生产使用现有 Nginx 的独立站点，将该域名转发至 `127.0.0.1:3000`。站点示例见 `deploy/nginx.conf`；证书和续期由服务器现有 HTTPS 管理方式维护。变更 Nginx 时先检查配置，再重载服务器现有实例。
+
+`our-garden.service` 显式设置 `COOKIE_SECURE=true` 和 `PUBLIC_ORIGIN=https://cyberhome.wuhuxiaoshu.com`。正式登录使用域名 HTTPS 地址。Nginx 应转发 Cookie、`Set-Cookie` 与浏览器原始 `Origin`，不缓存 API 响应。配置了 HTTPS 的服务仅用本地 HTTP 做 `/healthz` 检查，不用本地 HTTP 地址登录。
+
+### 日常状态、重启和日志
+
+```sh
+systemctl status our-garden.service --no-pager
+systemctl restart our-garden.service
+journalctl -u our-garden.service -n 80 --no-pager
+systemctl show our-garden.service -p MainPID -p MemoryCurrent -p MemoryMax -p Result
+```
+
+应用的重启命令只操作小院服务。数据库在独立数据目录中，重启后账号、项目、分工与讨论继续保留。
+
+### 原生方式的备份与恢复
+
+服务启动并完成账号初始化后，启用每天北京时间 03:15 后五分钟内执行的备份任务。下面的手动启动会立即生成第一份一致性备份：
+
+```sh
+systemctl enable --now our-garden-backup.timer
+systemctl start our-garden-backup.service
+systemctl show our-garden-backup.service -p Result -p ExecMainStatus
+systemctl list-timers our-garden-backup.timer --no-pager
+journalctl -u our-garden-backup.service -n 30 --no-pager
+```
+
+备份服务成功后退出，显示 `Result=success`、`ExecMainStatus=0` 为正常结果。它与 Docker 方式使用同一个 SQLite 一致性备份脚本，包含 WAL 中已提交的内容，并检查快照完整性。需要手动运行脚本时：
+
+```sh
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/scripts/backup.mjs
+```
+
+备份仍在同一台服务器，应定期通过 SSH 复制一份到另一个私密位置。恢复前先停止应用与备份任务，再把下面的示例文件名替换为真实快照：
+
+```sh
+systemctl stop our-garden.service our-garden-backup.timer our-garden-backup.service
+runuser -u ourgarden -- env DATA_DIR=/var/lib/our-garden /opt/our-garden-runtime/bin/node /opt/our-garden/deploy/restore.mjs /var/lib/our-garden/backups/garden-真实文件名.sqlite --app-stopped
+```
+
+确认恢复成功后再启动：
+
+```sh
+systemctl start our-garden.service our-garden-backup.timer
+curl --fail --silent --show-error http://127.0.0.1:3000/healthz
+```
+
+恢复脚本保留恢复前的数据文件，清除恢复后的登录会话；两人需要重新登录。首版没有上传文件接口，业务数据均在 SQLite 中；资料卡里的外部链接目标由原网站保存。
+
+### 原生方式更新源码
+
+更新前先备份，然后停止小院应用：
+
+```sh
+systemctl start our-garden-backup.service
+systemctl stop our-garden.service
+```
+
+用经过校验的发布包更新 `/opt/our-garden` 中的源码，保留 `/var/lib/our-garden` 的数据库、备份和凭据。如果服务模板也有变更，按前述步骤重新安装对应 unit。随后启动并检查：
+
+```sh
+systemctl daemon-reload
+systemctl start our-garden.service
+curl --fail --silent --show-error http://127.0.0.1:3000/healthz
+journalctl -u our-garden.service -n 30 --no-pager
+```
+
+## Docker 部署（可选）
 
 服务器需要已启动、允许你的 SSH 访问，并安装 Docker Engine 和 Compose 插件。Docker 官方支持 Ubuntu 22.04 x86_64；安装步骤见 [Ubuntu 官方安装说明](https://docs.docker.com/engine/install/ubuntu/)。本项目不修改服务器的 SSH 配置、防火墙或已有网站。
 

@@ -1,0 +1,16 @@
+{
+  "name": "our-little-garden",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "两个人一起种下想法、探索计划与共同目标的私有小院",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "accounts": "node scripts/accounts.mjs",
+    "backup": "node scripts/backup.mjs",
+    "package": "node scripts/package.mjs"
+  }
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Our Garden consistent SQLite backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/our-garden
+ExecStart=/usr/bin/docker compose exec -T app node scripts/backup.mjs
+TimeoutStartSec=120

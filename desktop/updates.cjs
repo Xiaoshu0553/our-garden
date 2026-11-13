@@ -30,7 +30,9 @@ class DesktopUpdater{
  async assetResponse(url,signal){
   for(let i=0;i<6;i++){
    const parsed=new URL(url);if(parsed.protocol!=='https:'||parsed.username||parsed.password||!redirectHosts.has(parsed.hostname)||parsed.port)throw Error('redirect');
-   const response=await this.fetch(parsed.href,{redirect:'manual',signal});
+   // A full-range request avoids the slow whole-object path on some release CDNs.
+   // Size and hash checks below still require the complete, unchanged installer.
+   const response=await this.fetch(parsed.href,{redirect:'manual',signal,headers:{Range:'bytes=0-'}});
    if([301,302,303,307,308].includes(response.status)){const location=response.headers.get('location');await response.body?.cancel();if(!location)throw Error('redirect');url=new URL(location,parsed).href;continue;}
    if(!response.ok||!response.body){await response.body?.cancel();throw Error('download');}return response;
   }throw Error('redirect');

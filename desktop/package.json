@@ -1,6 +1,6 @@
 {
   "name": "garden-companion",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "description": "两个人的小花园桌宠：随手记住想法，轻轻带给对方",
   "main": "main.cjs",

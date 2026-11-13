@@ -23,8 +23,8 @@ async function directory(t, cleanup = true) {
 function updater(dir, fetcher, extras={}) {
   return new updates.DesktopUpdater({version:'0.3.0',platform:'win32',arch:'x64',directory:dir,origin:'https://garden.example',fetch:fetcher,...extras});
 }
-function chunked(body = bytes) {
-  return new Response(new ReadableStream({start(controller){controller.enqueue(body.subarray(0,7));controller.enqueue(body.subarray(7,100));controller.enqueue(body.subarray(100));controller.close();}}),{headers:{'Content-Length':String(body.length)}});
+function chunked(body = bytes, status = 200) {
+  return new Response(new ReadableStream({start(controller){controller.enqueue(body.subarray(0,7));controller.enqueue(body.subarray(7,100));controller.enqueue(body.subarray(100));controller.close();}}),{status,headers:{'Content-Length':String(body.length)}});
 }
 
 test('更新清单区分平台、严格检查版本和官方安装包来源',()=>{
@@ -42,7 +42,7 @@ test('更新清单区分平台、严格检查版本和官方安装包来源',()=
 
 test('检查与服务器提醒均不下载；点击后分块下载、核验并打开对应包',async t=>{
   const dir=await directory(t),calls=[],opened=[];
-  const client=updater(dir,async url=>{calls.push(url);return url.endsWith('/api/desktop/release')?Response.json({release:manifest()}):chunked();},{portable:true,openInstaller:async(file,key)=>opened.push({file,key})});
+  const client=updater(dir,async (url,options)=>{calls.push(url);if(url.endsWith('/api/desktop/release'))return Response.json({release:manifest()});assert.equal(options.headers.Range,'bytes=0-');return chunked(bytes,206);},{portable:true,openInstaller:async(file,key)=>opened.push({file,key})});
   assert.equal((await client.check()).status,'available');assert.equal(calls.length,1);assert.deepEqual(opened,[]);
   assert.equal((await client.download()).status,'ready');assert.deepEqual(await readFile(client.file),bytes);assert.deepEqual(opened,[]);
   assert.equal((await Promise.all([client.install(),client.install()]))[0].opened,true);assert.equal(opened.length,1);assert.equal(opened[0].key,'win32-x64-portable');assert.match(opened[0].file,/-win-x64-portable\.exe$/);

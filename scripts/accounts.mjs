@@ -91,7 +91,7 @@ let credentials;
 try {
   const options = parseArguments(process.argv.slice(2));
   if (options.help) {
-    stdout.write(`两人小院 · 账号管理\n\n创建账号（交互输入昵称和密码）：\n  node scripts/accounts.mjs\n\n生成随机密码并写入本地私有文件：\n  node scripts/accounts.mjs --name 昵称 --generate data/accounts.credentials.local\n\n重置现有账号并使该账号的旧会话失效：\n  node scripts/accounts.mjs --reset --name 昵称\n  node scripts/accounts.mjs --reset --name 昵称 --generate data/accounts.credentials.local\n\n数据库目录可通过 DATA_DIR 环境变量或 --data-dir 指定。\n小院最多两个账号；没有公开注册接口。密码不会输出到终端或日志。\n`);
+    stdout.write(`两人小院 · 账号管理\n\n创建账号（交互输入昵称和密码）：\n  node scripts/accounts.mjs\n\n生成随机密码并写入本地私有文件：\n  node scripts/accounts.mjs --name 昵称 --generate data/accounts.credentials.local\n\n重置现有账号并使该账号的旧会话失效：\n  node scripts/accounts.mjs --reset --name 昵称\n  node scripts/accounts.mjs --reset --name 昵称 --generate data/accounts.credentials.local\n\n数据库目录可通过 DATA_DIR 环境变量或 --data-dir 指定。\n此工具只向原有小花园添加成员（最多两人）；其他用户可在网页自行注册并用邀请码连接。密码不会输出到终端或日志。\n`);
   } else {
     const dataDir = resolve(options.dataDir ?? process.env.DATA_DIR ?? join(root, 'data'));
     let details;

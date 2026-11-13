@@ -14,6 +14,9 @@ services:
       COOKIE_SECURE: "false"
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-}
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
+      COMPANION_AI_BASE_URL: ${COMPANION_AI_BASE_URL:-}
+      COMPANION_AI_MODEL: ${COMPANION_AI_MODEL:-}
+      COMPANION_AI_KEY: ${COMPANION_AI_KEY:-}
     ports:
       - "127.0.0.1:${APP_PORT:-3000}:3000"
     volumes:

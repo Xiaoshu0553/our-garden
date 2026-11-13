@@ -5,6 +5,8 @@ import { dirname, resolve, join, extname, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { openDatabase, transaction } from './lib/db.mjs';
+import { createCompanion } from './lib/companion.mjs';
+import { createInvitation, gardenFor, joinGarden, registerAccount } from './lib/gardens.mjs';
 import {
   HttpError, RateLimiter, assertKeys, equalTokens, hashPassword, resourceUrl,
   reviewDate, secretToken, textField, tokenHash, validateName, validatePassword, verifyPassword,
@@ -59,7 +61,7 @@ function json(response, status, value) {
   response.end(JSON.stringify(value));
 }
 
-async function requestBody(request) {
+async function parseRequestBody(request) {
   const length = Number(request.headers['content-length']);
   if (Number.isFinite(length) && length > maximumBodyBytes) {
     request.resume();
@@ -111,6 +113,8 @@ export function createApp(options = {}) {
   const db = openDatabase(dataDir);
   const loginLimiter = new RateLimiter(options.loginRateLimit);
   const profileLimiter = new RateLimiter({ perAccount: 10, perIp: 20, global: 40 });
+  const registrationLimiter = new RateLimiter(options.registrationRateLimit ?? { perAccount: 5, perIp: 10, global: 30 });
+  const invitationLimiter = new RateLimiter({ perAccount: 10, perIp: 20, global: 60 });
   let passwordOperations = 0;
   let lastSessionCleanup = 0;
 
@@ -131,7 +135,8 @@ export function createApp(options = {}) {
     const token = matches[0].slice(cookieName.length + 1);
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return null;
     const row = db.prepare(`SELECT sessions.token_hash, sessions.csrf_token, sessions.expires_at,
-      users.id, users.name FROM sessions JOIN users ON users.id = sessions.user_id
+      users.id, users.name, garden_members.garden_id FROM sessions JOIN users ON users.id = sessions.user_id
+      JOIN garden_members ON garden_members.user_id = users.id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`).get(tokenHash(token), now);
     return row ?? null;
   }
@@ -141,12 +146,26 @@ export function createApp(options = {}) {
     return {
       setupRequired,
       user: session ? { id: session.id, name: session.name } : null,
+      registrationEnabled: true,
+      ...(session ? { garden: gardenFor(db, session.id) } : {}),
       ...(session ? { csrfToken: session.csrf_token } : {}),
     };
   }
 
   function setCookie(response, token, ttlSeconds) {
     response.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${ttlSeconds}${cookieSecure ? '; Secure' : ''}`);
+  }
+
+  async function requestBody(request) {
+    const before = getSession(request);
+    const body = await parseRequestBody(request);
+    if (before) {
+      const after = getSession(request);
+      if (!after || before.id !== after.id || before.garden_id !== after.garden_id || before.token_hash !== after.token_hash) {
+        throw new HttpError(401, '账号或小花园已更新，请重新打开后再试。');
+      }
+    }
+    return body;
   }
 
   function startSession(response, user) {
@@ -185,17 +204,18 @@ export function createApp(options = {}) {
     }
   }
 
-  function users() {
-    return db.prepare('SELECT id, name FROM users ORDER BY created_at, id').all().map(({ id, name }) => ({ id, name }));
+  function users(gardenId) {
+    return db.prepare('SELECT u.id, u.name FROM users u JOIN garden_members m ON m.user_id = u.id WHERE m.garden_id = ? ORDER BY u.created_at, u.id').all(gardenId).map(({ id, name }) => ({ id, name }));
   }
 
-  function project(id) {
-    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  function project(id, gardenId) {
+    const row = db.prepare('SELECT * FROM projects WHERE id = ? AND garden_id = ?').get(id, gardenId);
     if (!row) throw new HttpError(404, '找不到这件一起想做的事。');
     return {
       id: row.id, title: row.title, description: row.description, stage: row.stage,
       authorId: row.author_id, goal: row.goal, nextReviewAt: row.next_review_at,
       createdAt: row.created_at, updatedAt: row.updated_at,
+      ...(companion.captureData(id) ? { capture: companion.captureData(id) } : {}),
       consents: db.prepare('SELECT user_id FROM consents WHERE project_id = ? ORDER BY user_id').all(id).map((item) => item.user_id),
       tasks: db.prepare('SELECT id, text, assignee_id, done FROM tasks WHERE project_id = ? ORDER BY created_at, id').all(id)
         .map((item) => ({ id: item.id, text: item.text, assigneeId: item.assignee_id, done: Boolean(item.done) })),
@@ -205,25 +225,67 @@ export function createApp(options = {}) {
   }
 
   function bothConsented(id) {
-    return db.prepare('SELECT COUNT(*) AS count FROM users').get().count === 2
+    return db.prepare('SELECT COUNT(*) AS count FROM garden_members WHERE garden_id = (SELECT garden_id FROM projects WHERE id = ?)').get(id).count === 2
       && db.prepare('SELECT COUNT(*) AS count FROM consents WHERE project_id = ?').get(id).count === 2;
   }
 
   function touch(id) { db.prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(new Date().toISOString(), id); }
 
-  function assignee(value) {
+  function assignee(value, gardenId) {
     if (value === null || value === undefined || value === '') return null;
-    if (typeof value !== 'string' || !db.prepare('SELECT id FROM users WHERE id = ?').get(value)) {
+    if (typeof value !== 'string' || !db.prepare('SELECT user_id FROM garden_members WHERE user_id = ? AND garden_id = ?').get(value, gardenId)) {
       throw new HttpError(400, '只能选择你们两人中的一位作为负责人。');
     }
     return value;
   }
+
+  const companion = createCompanion({ db, project, users, getSession, requireAuth, requireMutation, requestBody, json, aiOptions: options.companionAI });
 
   async function api(request, response, pathname) {
     noCache(response);
     const method = request.method;
     const session = getSession(request);
     if (pathname === '/api/auth/state' && method === 'GET') return json(response, 200, authState(session));
+    if (pathname.startsWith('/api/companion/')) return companion.handle(request, response, pathname, session);
+
+    if (pathname === '/api/auth/register' && method === 'POST') {
+      sameOrigin(request);
+      if (session) throw new HttpError(409, '你已经登录了，创建其他账号前请先退出。');
+      const body = await requestBody(request);
+      assertKeys(body, ['name', 'password', 'passwordConfirmation', 'inviteCode']);
+      const name = validateName(body.name);
+      validatePassword(body.password);
+      if (body.passwordConfirmation !== body.password) throw new HttpError(400, '两次密码不一致，请再检查一下。');
+      registrationLimiter.consume(request.socket.remoteAddress ?? 'unknown', name);
+      const user = await passwordOperation(() => registerAccount(db, { ...body, name }));
+      const auth = authState(startSession(response, user));
+      companion.changed(auth.garden.id);
+      return json(response, 201, auth);
+    }
+
+    if (pathname === '/api/garden' && method === 'GET') {
+      requireAuth(session);
+      return json(response, 200, { garden: gardenFor(db, session.id) });
+    }
+    if (pathname === '/api/garden/invite' && method === 'POST') {
+      requireMutation(request, session);
+      const body = await requestBody(request);
+      assertKeys(body, [], { allowEmpty: true });
+      invitationLimiter.consume(request.socket.remoteAddress ?? 'unknown', session.id);
+      return json(response, 201, { invite: createInvitation(db, session.id) });
+    }
+    if (pathname === '/api/garden/join' && method === 'POST') {
+      requireMutation(request, session);
+      const body = await requestBody(request);
+      assertKeys(body, ['code', 'shareExisting']);
+      invitationLimiter.consume(request.socket.remoteAddress ?? 'unknown', session.id);
+      const result = joinGarden(db, session.id, body);
+      db.prepare('DELETE FROM sessions WHERE user_id = ?').run(session.id);
+      const auth = authState(startSession(response, session));
+      companion.changed(result.previousGardenId);
+      companion.changed(result.garden.id);
+      return json(response, 200, auth);
+    }
 
     if (pathname === '/api/auth/login' && method === 'POST') {
       sameOrigin(request);
@@ -282,8 +344,8 @@ export function createApp(options = {}) {
 
     if (pathname === '/api/state' && method === 'GET') {
       requireAuth(session);
-      const ids = db.prepare('SELECT id FROM projects ORDER BY updated_at DESC, id').all();
-      return json(response, 200, { users: users(), projects: ids.map((item) => project(item.id)) });
+      const ids = db.prepare('SELECT id FROM projects WHERE garden_id = ? ORDER BY updated_at DESC, id').all(session.garden_id);
+      return json(response, 200, { users: users(session.garden_id), garden: gardenFor(db, session.id), projects: ids.map((item) => project(item.id, session.garden_id)) });
     }
 
     if (pathname === '/api/projects' && method === 'POST') {
@@ -292,25 +354,29 @@ export function createApp(options = {}) {
       assertKeys(body, ['title', 'description']);
       const title = textField(body.title, '标题', 120);
       const description = textField(body.description ?? '', '想法说明', 4000, { allowEmpty: true });
-      if (db.prepare('SELECT COUNT(*) AS count FROM projects').get().count >= 500) throw new HttpError(400, '小家已保存 500 件想做的事，请先整理后再添加。');
+      if (db.prepare('SELECT COUNT(*) AS count FROM projects WHERE garden_id = ?').get(session.garden_id).count >= 500) throw new HttpError(400, '小家已保存 500 件想做的事，请先整理后再添加。');
       const id = randomUUID();
       const now = new Date().toISOString();
-      db.prepare('INSERT INTO projects (id, title, description, author_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(id, title, description, session.id, now, now);
-      return json(response, 201, { project: project(id) });
+      transaction(db, () => {
+        db.prepare('INSERT INTO projects (id, title, description, author_id, created_at, updated_at, garden_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, title, description, session.id, now, now, session.garden_id);
+        companion.activity(session.id, id, 'idea');
+      });
+      return json(response, 201, { project: project(id, session.garden_id) });
     }
 
     let match;
     if ((match = pathname.match(projectRoute))) {
       requireAuth(session);
       const id = match[1];
+      if (method === 'GET') return json(response, 200, { project: project(id, session.garden_id) });
       if (method === 'PATCH') {
         requireMutation(request, session);
         const body = await requestBody(request);
         assertKeys(body, ['title', 'description', 'stage', 'goal', 'nextReviewAt']);
         // Read current fields after the asynchronous request body. A slow upload
         // must not overwrite fields the other member saved in the meantime.
-        const original = project(id);
+        const original = project(id, session.garden_id);
         const title = body.title === undefined ? original.title : textField(body.title, '标题', 120);
         const description = body.description === undefined ? original.description : textField(body.description, '想法说明', 4000, { allowEmpty: true });
         const goal = body.goal === undefined ? original.goal : textField(body.goal, '共同目标', 4000, { allowEmpty: true });
@@ -320,16 +386,20 @@ export function createApp(options = {}) {
         if (stage !== original.stage && ['exploring', 'active', 'completed'].includes(stage) && !bothConsented(id)) {
           throw new HttpError(409, '需要两个人都确认想一起做，才能进入这个阶段。');
         }
-        db.prepare('UPDATE projects SET title = ?, description = ?, stage = ?, goal = ?, next_review_at = ?, updated_at = ? WHERE id = ?')
-          .run(title, description, stage, goal, nextReviewAt, new Date().toISOString(), id);
-        return json(response, 200, { project: project(id) });
+        transaction(db, () => {
+          db.prepare('UPDATE projects SET title = ?, description = ?, stage = ?, goal = ?, next_review_at = ?, updated_at = ? WHERE id = ?')
+            .run(title, description, stage, goal, nextReviewAt, new Date().toISOString(), id);
+          companion.activity(session.id, id, 'update');
+        });
+        return json(response, 200, { project: project(id, session.garden_id) });
       }
       if (method === 'DELETE') {
         requireMutation(request, session);
         const body = await requestBody(request);
         assertKeys(body, [], { allowEmpty: true });
-        if (project(id).authorId !== session.id) throw new HttpError(403, '只有发起这件事的人可以删除它。');
+        if (project(id, session.garden_id).authorId !== session.id) throw new HttpError(403, '只有发起这件事的人可以删除它。');
         db.prepare('DELETE FROM projects WHERE id = ?').run(id);
+        companion.changed(session.garden_id);
         return json(response, 200, { ok: true });
       }
       throw new HttpError(405, '这个接口不支持当前操作。');
@@ -340,15 +410,16 @@ export function createApp(options = {}) {
       const id = match[1];
       const body = await requestBody(request);
       assertKeys(body, [], { allowEmpty: true });
-      project(id);
+      project(id, session.garden_id);
       transaction(db, () => {
         const consent = db.prepare('SELECT user_id FROM consents WHERE project_id = ? AND user_id = ?').get(id, session.id);
         if (consent) db.prepare('DELETE FROM consents WHERE project_id = ? AND user_id = ?').run(id, session.id);
         else db.prepare('INSERT INTO consents (project_id, user_id) VALUES (?, ?)').run(id, session.id);
         if (bothConsented(id)) db.prepare("UPDATE projects SET stage = 'exploring' WHERE id = ? AND stage = 'idea'").run(id);
         touch(id);
+        companion.activity(session.id, id, 'consent');
       });
-      return json(response, 200, { project: project(id) });
+      return json(response, 200, { project: project(id, session.garden_id) });
     }
 
     if ((match = pathname.match(tasksRoute)) && method === 'POST') {
@@ -356,40 +427,42 @@ export function createApp(options = {}) {
       const projectId = match[1];
       const body = await requestBody(request);
       assertKeys(body, ['text', 'assigneeId']);
-      project(projectId);
+      project(projectId, session.garden_id);
       const text = textField(body.text, '待办', 300);
-      const assigneeId = assignee(body.assigneeId);
+      const assigneeId = assignee(body.assigneeId, session.garden_id);
       if (db.prepare('SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?').get(projectId).count >= 200) throw new HttpError(400, '一件事最多保存 200 条待办，请先整理。');
       transaction(db, () => {
         db.prepare('INSERT INTO tasks (id, project_id, text, assignee_id, created_at) VALUES (?, ?, ?, ?, ?)')
           .run(randomUUID(), projectId, text, assigneeId, new Date().toISOString());
         touch(projectId);
+        companion.activity(session.id, projectId, 'task');
       });
-      return json(response, 201, { project: project(projectId) });
+      return json(response, 201, { project: project(projectId, session.garden_id) });
     }
 
     if ((match = pathname.match(taskRoute)) && ['PATCH', 'DELETE'].includes(method)) {
       requireMutation(request, session);
       const [, projectId, taskId] = match;
       const body = await requestBody(request);
-      project(projectId);
+      project(projectId, session.garden_id);
       const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND project_id = ?').get(taskId, projectId);
       if (!task) throw new HttpError(404, '找不到这条待办。');
       if (method === 'DELETE') {
         assertKeys(body, [], { allowEmpty: true });
-        transaction(db, () => { db.prepare('DELETE FROM tasks WHERE id = ? AND project_id = ?').run(taskId, projectId); touch(projectId); });
+        transaction(db, () => { db.prepare('DELETE FROM tasks WHERE id = ? AND project_id = ?').run(taskId, projectId); touch(projectId); companion.activity(session.id, projectId, 'task'); });
       } else {
         assertKeys(body, ['text', 'assigneeId', 'done']);
         const text = body.text === undefined ? task.text : textField(body.text, '待办', 300);
-        const assigneeId = body.assigneeId === undefined ? task.assignee_id : assignee(body.assigneeId);
+        const assigneeId = body.assigneeId === undefined ? task.assignee_id : assignee(body.assigneeId, session.garden_id);
         if (body.done !== undefined && typeof body.done !== 'boolean') throw new HttpError(400, '待办完成状态需为 true 或 false。');
         const done = body.done === undefined ? task.done : Number(body.done);
         transaction(db, () => {
           db.prepare('UPDATE tasks SET text = ?, assignee_id = ?, done = ? WHERE id = ? AND project_id = ?').run(text, assigneeId, done, taskId, projectId);
           touch(projectId);
+          companion.activity(session.id, projectId, 'task');
         });
       }
-      return json(response, 200, { project: project(projectId) });
+      return json(response, 200, { project: project(projectId, session.garden_id) });
     }
 
     if ((match = pathname.match(notesRoute)) && method === 'POST') {
@@ -397,7 +470,7 @@ export function createApp(options = {}) {
       const projectId = match[1];
       const body = await requestBody(request);
       assertKeys(body, ['kind', 'text', 'url']);
-      project(projectId);
+      project(projectId, session.garden_id);
       if (!noteKinds.includes(body.kind)) throw new HttpError(400, '请选择讨论、决定或资料作为记录类型。');
       const text = textField(body.text, '记录', 8000);
       const url = resourceUrl(body.url);
@@ -406,21 +479,22 @@ export function createApp(options = {}) {
         db.prepare('INSERT INTO notes (id, project_id, kind, text, url, author_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(randomUUID(), projectId, body.kind, text, url, session.id, new Date().toISOString());
         touch(projectId);
+        companion.activity(session.id, projectId, 'comment');
       });
-      return json(response, 201, { project: project(projectId) });
+      return json(response, 201, { project: project(projectId, session.garden_id) });
     }
 
     if ((match = pathname.match(noteRoute)) && method === 'DELETE') {
       requireMutation(request, session);
       const [, projectId, noteId] = match;
       const body = await requestBody(request);
-      project(projectId);
+      project(projectId, session.garden_id);
       const note = db.prepare('SELECT author_id FROM notes WHERE id = ? AND project_id = ?').get(noteId, projectId);
       if (!note) throw new HttpError(404, '找不到这条记录。');
       if (note.author_id !== session.id) throw new HttpError(403, '只能删除自己写下的记录。');
       assertKeys(body, [], { allowEmpty: true });
-      transaction(db, () => { db.prepare('DELETE FROM notes WHERE id = ? AND project_id = ?').run(noteId, projectId); touch(projectId); });
-      return json(response, 200, { project: project(projectId) });
+      transaction(db, () => { db.prepare('DELETE FROM notes WHERE id = ? AND project_id = ?').run(noteId, projectId); touch(projectId); companion.changed(session.garden_id); });
+      return json(response, 200, { project: project(projectId, session.garden_id) });
     }
 
     if (pathname.startsWith('/api/')) {
@@ -461,7 +535,7 @@ export function createApp(options = {}) {
     if (!contentType) throw new HttpError(404, '找不到这个文件。');
     response.writeHead(200, {
       'Content-Type': contentType, 'Content-Length': info.size,
-      'Cache-Control': ['.html', '.js', '.css'].includes(extname(filename)) ? 'no-cache' : 'public, max-age=3600',
+      'Cache-Control': ['.html', '.js', '.mjs', '.css'].includes(extname(filename)) ? 'no-cache' : 'public, max-age=3600',
     });
     if (request.method === 'HEAD') return response.end();
     const stream = createReadStream(actualFile);
@@ -501,6 +575,8 @@ export function createApp(options = {}) {
   server.maxRequestsPerSocket = 1000;
   server.db = db;
   server.garden = { dataDir, publicDir, publicOrigin, cookieSecure };
+  const close = server.close.bind(server);
+  server.close = (...args) => { companion.close(); return close(...args); };
   server.once('close', () => db.close());
   return server;
 }

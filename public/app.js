@@ -1,3 +1,4 @@
+import { renderAccountForm, renderPairing, copyInvitation } from './companion/accounts-ui.mjs';
 const app = document.getElementById('app');
 const projectDialog = document.getElementById('project-dialog');
 const editorDialog = document.getElementById('editor-dialog');
@@ -6,7 +7,7 @@ const toastElement = document.getElementById('toast');
 const stages = { idea: '想聊聊', exploring: '一起探索', active: '正在行动', completed: '一起完成', paused: '先放一放' };
 const pages = { home: ['小院', 'home'], ideas: ['灵感墙', 'note'], projects: ['一起推进', 'sprout'], memories: ['回忆书架', 'book'] };
 const noteLabels = { comment: '讨论', resource: '资料', decision: '决定' };
-const state = { user: null, csrfToken: '', setupRequired: false, demo: false, users: [], projects: [], page: 'home', filter: 'all', search: '', projectId: null, noteKind: 'comment', offline: false };
+const state = { user: null, garden: null, invite: null, authMode: 'login', csrfToken: '', setupRequired: false, demo: false, users: [], projects: [], page: 'home', filter: 'all', search: '', projectId: null, noteKind: 'comment', offline: false };
 let toastTimer;
 let confirmAction;
 let refreshPending = false;
@@ -93,7 +94,7 @@ async function api(path, method = 'GET', body) {
   let result;
   try { result = await response.json(); } catch { throw new Error('小院暂时没有正常回应，请稍后再试。'); }
   if (!response.ok) {
-    if (response.status === 401 && !['/api/auth/login', '/api/auth/me'].includes(path)) {
+    if (response.status === 401 && !['/api/auth/login', '/api/auth/register', '/api/auth/me'].includes(path)) {
       state.user = null; state.csrfToken = ''; state.projects = []; state.users = [];
       closeDialogs(); renderLogin();
     }
@@ -105,7 +106,7 @@ async function api(path, method = 'GET', body) {
 }
 async function loadState() {
   const data = await api('/api/state');
-  state.users = data.users;
+  state.users = data.users; state.garden = data.garden || null;
   state.projects = data.projects;
   const updated = data.users.find(item => item.id === state.user?.id);
   if (updated) state.user = updated;
@@ -125,8 +126,9 @@ async function mutateProject(path, method, body) {
   return result;
 }
 function renderLogin(message = '') {
-  document.title = '两人小院 · 回到我们的小家';
-  app.innerHTML = `<main class="login-page"><section class="login-picture">${brand()}<img src="/garden.svg" alt="柔和绿树环绕着一座小屋，门前有花盆与信箱"><h1>有些想法，<br>想和你一起慢慢实现。</h1><p>在这个只属于两个人的小院里，<br>留下灵感、聊聊计划，也记录我们一起迈出的小步。</p></section><section><div class="login-panel"><span class="eyebrow">WELCOME HOME</span><h2>回来啦。</h2><p>用你的昵称和密码，打开小院的门。</p>${state.setupRequired ? '<div class="setup-message">小院正在迎接第一位住户。请联系小院主人领取你们的专属账号，也可以先看看示例小院。</div>' : ''}<form data-form="login"><label class="field">你的昵称<input name="name" autocomplete="username" maxlength="40" placeholder="小院里的名字" required></label><label class="field">密码<input name="password" type="password" autocomplete="current-password" maxlength="256" placeholder="只有你知道的那串字符" required></label><p class="form-error" data-error role="alert" ${message ? '' : 'hidden'}>${escape(message)}</p><button class="btn primary" type="submit">打开小院的门 ${icon('arrow')}</button></form><div class="login-divider">或先逛一逛</div><button class="btn demo" type="button" data-action="demo">${icon('leaf')} 看看示例小院</button><div class="login-footnote">两个住户 · 一处小院 · 很多一起想做的事</div></div></section></main>`;
+  const registering = state.authMode === 'register';
+  document.title = registering ? '两人小院 · 注册我们的小花园' : '两人小院 · 回到我们的小家';
+  app.innerHTML = `<main class="login-page"><section class="login-picture">${brand()}<img src="/garden.svg" alt="柔和绿树环绕着一座小屋，门前有花盆与信箱"><h1>有些想法，<br>想和你一起慢慢实现。</h1><p>各自注册，用邀请码找到彼此，<br>在两个人的小院里，慢慢把念头变成日常。</p></section><section><div class="login-panel"><span class="eyebrow">WELCOME HOME</span><h2>${registering ? '一起，种下一个开始。' : '回来啦。'}</h2><p>${registering ? '给自己创建账号，也给伴侣留一个位置。' : '用你的昵称和密码，打开小院的门。'}</p>${renderAccountForm(state.authMode, message)}<div class="login-divider">或先逛一逛</div><button class="btn demo" type="button" data-action="demo">${icon('leaf')} 看看示例小院</button><div class="login-footnote">两个住户 · 一处小院 · 很多一起想做的事</div></div></section></main>`;
 }
 function matches(project) {
   const query = state.search.trim().toLocaleLowerCase();
@@ -238,6 +240,11 @@ function openProject(id) {
   state.projectId = id; state.noteKind = 'comment';
   renderProject(false); showDialog(projectDialog);
 }
+
+function openLinkedProject() {
+  const id = new URLSearchParams(location.search).get('project');
+  if (id && state.projects.some(project => project.id === id)) openProject(id);
+}
 function editorHeader(title, copy) {
   return `<div class="dialog-top"><span class="eyebrow">A SMALL SEED, A SHARED FUTURE</span><button class="icon-button" type="button" data-close="editor-dialog" aria-label="关闭编辑">${icon('close')}</button></div><div class="editor-body"><h2>${title}</h2><p>${copy}</p>`;
 }
@@ -255,7 +262,7 @@ function confirm(title, copy, action) {
   showDialog(editorDialog);
 }
 function renderProfile() {
-  profileDialog.innerHTML = `<div class="dialog-top"><span class="eyebrow">YOUR LITTLE CORNER</span><button class="icon-button" type="button" data-close="profile-dialog" aria-label="关闭我的设置">${icon('close')}</button></div><div class="editor-body"><h2>你的小小角落</h2><p>${state.demo ? '这里的修改只影响当前示例，回到登录后就会清空。' : '给自己换个昵称，也可以更新小院的登录密码。'}</p><form data-form="profile"><label class="field">小院里的名字<input name="name" maxlength="40" value="${escape(state.user.name)}" autocomplete="username" required></label>${!state.demo ? '<div class="profile-divider"></div><label class="field">当前密码<input name="currentPassword" type="password" autocomplete="current-password" maxlength="256" placeholder="修改密码时填写"></label><label class="field">新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="至少 12 个字符，留空就保持原密码"></label><label class="field">再确认一次新密码<input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="再输入一次新密码"></label>' : ''}<p class="form-error" data-error role="alert" hidden></p><div class="editor-actions"><button class="btn primary" type="submit">保存设置 ${icon('check')}</button></div></form><div class="profile-divider"></div><div class="profile-tools"><button class="btn quiet compact" type="button" data-action="export-all">${icon('download')} 导出我们的记录</button><button class="btn quiet compact" type="button" data-action="logout">${icon('logout')} ${state.demo ? '回到登录' : '退出小院'}</button></div></div>`;
+  profileDialog.innerHTML = `<div class="dialog-top"><span class="eyebrow">YOUR LITTLE CORNER</span><button class="icon-button" type="button" data-close="profile-dialog" aria-label="关闭我的设置">${icon('close')}</button></div><div class="editor-body"><h2>你的小小角落</h2><p>${state.demo ? '这里的修改只影响当前示例，回到登录后就会清空。' : '给自己换个昵称，也可以更新小院的登录密码。'}</p><form data-form="profile"><label class="field">小院里的名字<input name="name" maxlength="40" value="${escape(state.user.name)}" autocomplete="username" required></label>${!state.demo ? '<div class="profile-divider"></div><label class="field">当前密码<input name="currentPassword" type="password" autocomplete="current-password" maxlength="256" placeholder="修改密码时填写"></label><label class="field">新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="至少 12 个字符，留空就保持原密码"></label><label class="field">再确认一次新密码<input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="再输入一次新密码"></label>' : ''}<p class="form-error" data-error role="alert" hidden></p><div class="editor-actions"><button class="btn primary" type="submit">保存设置 ${icon('check')}</button></div></form>${!state.demo ? `<section id="pairing-settings" class="garden-pairing">${renderPairing(state.garden, state.invite)}</section>` : ''}<div class="profile-divider"></div><div class="profile-tools"><button class="btn quiet compact" type="button" data-action="export-all">${icon('download')} 导出我们的记录</button><button class="btn quiet compact" type="button" data-action="logout">${icon('logout')} ${state.demo ? '回到登录' : '退出小院'}</button></div></div>`;
   showDialog(profileDialog);
 }
 function download(data, filename) {
@@ -340,6 +347,13 @@ document.addEventListener('click', async event => {
   const project = state.projects.find(item => item.id === state.projectId);
   try {
     switch (action) {
+      case 'auth-mode': state.authMode = target.dataset.mode === 'register' ? 'register' : 'login'; renderLogin(); break;
+      case 'create-invite': {
+        target.disabled = true; const result = await api('/api/garden/invite', 'POST', {}); state.invite = result.invite;
+        const pairing = document.getElementById('pairing-settings'); if (pairing) pairing.innerHTML = renderPairing(state.garden, state.invite);
+        toast('邀请码准备好了，交给你的伴侣吧。'); break;
+      }
+      case 'copy-invite': toast(await copyInvitation(state.invite)); break;
       case 'demo': enterDemo(); break;
       case 'exit-demo': await exitDemo(); break;
       case 'demo-switch': state.user = state.users.find(person => person.id !== state.user.id); renderShell(); if (projectDialog.open) renderProject(); toast(`现在以 ${state.user.name} 的身份逛示例小院。`); break;
@@ -354,7 +368,7 @@ document.addEventListener('click', async event => {
       case 'delete-project': confirm('删除整个想法？', '这张想法卡，以及它的讨论、资料和待办，都会一并删除。', async () => { await api(`/api/projects/${project.id}`, 'DELETE', {}); state.projects = state.projects.filter(item => item.id !== project.id); projectDialog.close(); renderShell(); toast('已删除这个想法。'); }); break;
       case 'export-project': download({ exportedAt: new Date().toISOString(), users: state.users, project }, 'our-garden-project.json'); break;
       case 'export-all': download({ exportedAt: new Date().toISOString(), users: state.users, projects: state.projects }, 'our-garden-records.json'); break;
-      case 'logout': if (state.demo) await exitDemo(); else { await api('/api/auth/logout', 'POST', {}); state.user = null; state.projects = []; state.users = []; state.csrfToken = ''; closeDialogs(); renderLogin(); } break;
+      case 'logout': if (state.demo) await exitDemo(); else { await api('/api/auth/logout', 'POST', {}); state.user = null; state.garden = null; state.invite = null; state.authMode = 'login'; state.projects = []; state.users = []; state.csrfToken = ''; closeDialogs(); renderLogin(); } break;
     }
   } catch (error) { toast(error.message, true); target.disabled = false; }
 });
@@ -398,10 +412,17 @@ document.addEventListener('submit', event => {
   const projectId = state.projectId;
   busy(form, async () => {
     switch (kind) {
+      case 'register':
       case 'login': {
-        const auth = await api('/api/auth/login', 'POST', values);
+        if (kind === 'register' && values.password !== values.passwordConfirmation) throw new Error('两次密码不一致，请再检查一下。');
+        const auth = await api(kind === 'register' ? '/api/auth/register' : '/api/auth/login', 'POST', values);
+        state.invite = null; state.authMode = 'login';
         Object.assign(state, auth, { demo: false, page: 'home', filter: 'all', search: '' });
-        await loadState(); renderShell(); break;
+        await loadState(); renderShell(); openLinkedProject(); if (kind === 'register' && state.garden?.canInvite) renderProfile(); break;
+      }
+      case 'garden-join': {
+        const auth = await api('/api/garden/join', 'POST', { code: values.code, shareExisting: values.shareExisting === 'yes' });
+        Object.assign(state, auth); state.invite = null; await loadState(); profileDialog.close(); renderShell(); toast('连接好了，今后的念头一起记住。'); break;
       }
       case 'project-create': {
         const result = await mutateProject('/api/projects', 'POST', { title: values.title, description: values.description });
@@ -450,7 +471,7 @@ setInterval(refresh, 15000);
 async function initialize() {
   try {
     Object.assign(state, await api('/api/auth/state'));
-    if (state.user) { state.page = pages[location.hash.slice(1)] ? location.hash.slice(1) : 'home'; await loadState(); renderShell(); }
+    if (state.user) { state.page = pages[location.hash.slice(1)] ? location.hash.slice(1) : 'home'; await loadState(); renderShell(); openLinkedProject(); }
     else renderLogin();
   } catch (error) { renderLogin(error.message); }
 }

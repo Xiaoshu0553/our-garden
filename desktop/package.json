@@ -1,0 +1,29 @@
+{
+  "name": "garden-companion",
+  "version": "0.3.0",
+  "private": true,
+  "description": "两个人的小花园桌宠：随手记住想法，轻轻带给对方",
+  "main": "main.cjs",
+  "author": "Our Little Garden",
+  "scripts": {
+    "start": "electron .",
+    "pack:win": "electron-builder --win --dir",
+    "dist:win": "electron-builder --win portable",
+    "dist:mac": "electron-builder --mac zip --arm64 --x64"
+  },
+  "devDependencies": {
+    "electron": "45.3.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.ourlittlegarden.companion",
+    "productName": "小花园桌宠",
+    "directories": { "output": "../.local/desktop-release" },
+    "files": ["main.cjs", "preload.cjs", "core.cjs", "package.json"],
+    "extraResources": [{ "from": "../public/companion", "to": "companion" }],
+    "win": { "target": "portable", "signAndEditExecutable": false },
+    "portable": { "unpackDirName": true },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.lifestyle" },
+    "artifactName": "Garden-Companion-${version}-${os}-${arch}.${ext}"
+  }
+}

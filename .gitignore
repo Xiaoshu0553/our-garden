@@ -4,6 +4,8 @@ backups/
 .env.*
 !.env.example
 node_modules/
+desktop/node_modules/
+desktop/dist/
 coverage/
 test-results/
 playwright-report/
@@ -16,6 +18,12 @@ backup-download/
 *.zip
 *.tar
 *.tar.gz
+*.exe
+*.dmg
+*.blockmap
+*.p12
+*.pfx
+*.pem
 .local/
 .DS_Store
 Thumbs.db

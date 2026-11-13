@@ -16,6 +16,7 @@ Environment=PORT=3000
 Environment=DATA_DIR=/var/lib/our-garden
 Environment=COOKIE_SECURE=true
 Environment=PUBLIC_ORIGIN=https://cyberhome.wuhuxiaoshu.com
+EnvironmentFile=-/var/lib/our-garden/companion.env
 ExecStart=/opt/our-garden-runtime/bin/node /opt/our-garden/server.mjs
 Restart=on-failure
 RestartSec=5s

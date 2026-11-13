@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <title>小花园 · 两个人的灵感小伙伴</title>
+  <link rel="icon" href="dog.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="preview-caption" aria-hidden="true"><span>OUR LITTLE COMPANION</span><p>把一闪而过的念头，<br>轻轻带到你身边。</p></div>
+  <main id="companion" class="companion" aria-label="小花园桌宠面板">
+    <header class="topbar">
+      <div class="brand"><img class="brand-symbol" src="tray.png" alt=""><div><strong>小花园</strong><span>两个人的灵感小伙伴</span></div></div>
+      <div class="top-actions"><button type="button" id="settings-button" class="icon-button" aria-label="打开设置"></button><button type="button" id="hide-button" class="icon-button" aria-label="收起面板"></button></div>
+    </header>
+    <div class="connection-row"><button type="button" id="identity-button" class="pair-pill"></button><span id="connection-state" class="connection-state" role="status"></span></div>
+    <div id="notice-area"></div>
+    <div id="queue-area"></div>
+    <div id="content" class="content"></div>
+    <nav id="navigation" class="bottom-nav" aria-label="桌宠功能"></nav>
+  </main>
+  <aside class="preview-pet" id="preview-pet"><button type="button" id="preview-pet-button" aria-label="点击小伙伴，展开输入面板"><img id="preview-pet-image" src="dog.svg" alt="戴绿色小围巾的小狗桌宠"></button><span>点我，留个小念头</span></aside>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>

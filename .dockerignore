@@ -4,6 +4,8 @@
 data
 backups
 node_modules
+**/node_modules
+desktop
 coverage
 tests
 test

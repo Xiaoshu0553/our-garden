@@ -1,0 +1,19 @@
+.garden-auth-tabs{display:flex;gap:6px;margin:20px 0 18px;padding:4px;background:var(--paper);border:1px solid var(--line);border-radius:12px}
+.garden-auth-tab{flex:1;padding:9px 12px;border:0;border-radius:9px;background:transparent;color:var(--muted);font:inherit}
+.garden-auth-tab.active{background:var(--card);color:var(--green-dark);box-shadow:0 2px 8px #4652380b}
+.garden-auth-submit{width:100%;display:flex;align-items:center;justify-content:center;gap:12px}
+.garden-account-help{color:var(--muted);font-size:12px;line-height:1.8;margin:9px 0 13px}
+.garden-members{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:15px 0}
+.garden-member{display:inline-flex;align-items:center;gap:8px;color:var(--ink);overflow-wrap:anywhere}
+.garden-member>span{display:grid;place-items:center;width:30px;height:30px;flex-shrink:0;border-radius:50%;background:var(--soft,var(--green-soft));color:var(--green-dark);font-size:12px}
+.garden-code-row{display:flex;gap:8px;align-items:center;min-width:0}
+.garden-code-row input{font-family:ui-monospace,monospace!important;font-size:12px!important;min-width:0;flex:1;padding:12px 9px!important}
+.garden-code-row button{flex-shrink:0}
+.garden-join-divider{border-top:1px solid var(--line);margin:24px 0 18px}
+.garden-join-form{margin-top:12px;display:grid;gap:10px}
+.garden-share-consent{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:var(--ink);line-height:1.8}
+.garden-share-consent input{width:16px!important;height:16px;margin:4px 0 0;flex-shrink:0;accent-color:var(--green)}
+.garden-pairing{padding:22px 0;border-top:1px solid var(--line);margin-top:22px}
+.garden-pairing h2{font-size:18px;line-height:1.6}.garden-pairing h3{font-size:14px}
+.register-hero img{width:64px!important;height:64px!important}.register-hero{padding-top:4px!important}
+@media(max-width:360px){.garden-code-row{flex-wrap:wrap}.garden-code-row input{flex-basis:100%}.garden-auth-tab{padding:8px}}

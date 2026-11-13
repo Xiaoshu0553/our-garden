@@ -6,6 +6,7 @@ async function call(channel, ...args) {
 }
 contextBridge.exposeInMainWorld('gardenDesktop', {
   info: () => call('garden:info'),
+  update: action => call('garden:update', action),
   request: (path, method, body) => call('garden:request', path, method, body),
   settings: value => call('garden:settings', value),
   configure: value => call('garden:configure', value),

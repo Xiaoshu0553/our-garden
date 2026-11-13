@@ -7,6 +7,7 @@ export async function createTransport(onChange) {
     return {
       desktop: true,
       info: () => desktop.info(),
+      update: action => desktop.update(action),
       request: (path, method = 'GET', body) => desktop.request(path, method, body),
       settings: value => desktop.settings(value),
       configure: value => desktop.configure(value),
@@ -48,14 +49,14 @@ export async function createTransport(onChange) {
       if (mode === 'demo') return demo.request(userId, path, method, body);
       let response;
       try {
-        response = await fetch(path, { method, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(path.endsWith('/chat') ? 35000 : 15000), headers: { ...(method !== 'GET' ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+        response = await fetch(path, { method, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000), headers: { ...(method !== 'GET' ? { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
       } catch { const error = new Error('暂时连不上小花园，想法会留在本机等待重试。'); error.offline = true; throw error; }
       let data;
       try { data = await response.json(); } catch { throw new Error('小花园暂时没有正常回应。'); }
       if (!response.ok) { const error = new Error(response.status === 404 && path.startsWith('/api/companion/') ? '小花园服务还需要更新到支持桌宠的版本。' : data.error || '暂时没能完成，请稍后再试。'); error.status = response.status; throw error; }
       if (data.csrfToken) csrf = data.csrfToken;
       if (path === '/api/auth/logout') { csrf = ''; events?.close(); }
-      if (['/api/auth/state', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/api/garden/join'].includes(path) && data.user) startEvents();
+      if (['/api/auth/state', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/api/garden/join', '/api/garden/unlink'].includes(path) && data.user) startEvents();
       return data;
     },
     async settings(value) { saved = { ...saved, ...value }; localStorage.setItem(configKey, JSON.stringify(saved)); return transport.info(); },

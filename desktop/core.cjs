@@ -11,8 +11,8 @@ function serverOrigin(value) {
 }
 function allowedRequest(apiPath, method) {
   if (!['GET', 'POST', 'PATCH'].includes(method) || typeof apiPath !== 'string' || apiPath.includes('?') || apiPath.includes('#')) return false;
-  if (method === 'GET') return ['/api/auth/state', '/api/state', '/api/garden', '/api/companion/status', '/api/companion/inbox'].includes(apiPath);
-  if (method === 'POST') return ['/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/garden/invite', '/api/garden/join', '/api/companion/capture', '/api/companion/chat', '/api/companion/inbox/read', '/api/companion/inbox/delivered'].includes(apiPath) || /^\/api\/projects\/[a-zA-Z0-9-]+\/(consent|notes|tasks)$/.test(apiPath);
+  if (method === 'GET') return ['/api/auth/state', '/api/state', '/api/garden', '/api/companion/status', '/api/companion/inbox'].includes(apiPath) || /^\/api\/garden\/archives\/[a-zA-Z0-9-]{1,80}$/.test(apiPath);
+  if (method === 'POST') return ['/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/garden/invite', '/api/garden/join', '/api/garden/unlink', '/api/companion/capture', '/api/companion/inbox/read', '/api/companion/inbox/delivered'].includes(apiPath) || /^\/api\/projects\/[a-zA-Z0-9-]+\/(consent|notes|tasks)$/.test(apiPath);
   return apiPath === '/api/auth/me' || /^\/api\/projects\/[a-zA-Z0-9-]+(?:\/tasks\/[a-zA-Z0-9-]+)?$/.test(apiPath);
 }
 function writeJSON(filename, value) {
@@ -82,7 +82,13 @@ class GardenClient {
         const { value, done } = await reader.read(); if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let at;
-        while ((at = buffer.indexOf('\n\n')) >= 0) { const event = buffer.slice(0, at); buffer = buffer.slice(at + 2); if (/event: (changed|ready)/.test(event)) changed(); }
+        while ((at = buffer.indexOf('\n\n')) >= 0) {
+          const event = buffer.slice(0, at); buffer = buffer.slice(at + 2);
+          if (/event: (changed|ready)/.test(event)) changed({type:'changed'});
+          else if (/^event: release$/m.test(event)) {
+            try { const data=JSON.parse(event.split('\n').find(line=>line.startsWith('data: '))?.slice(6)||'null'); if(typeof data?.version==='string')changed({type:'release',version:data.version}); } catch { /* malformed hint ignored */ }
+          }
+        }
         if (buffer.length > 65536) throw new Error('INVALID_EVENT');
       }
     } finally { await reader.cancel().catch(() => {}); }

@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { createApp } from '../../server.mjs';
 import { createAccount } from '../../lib/accounts.mjs';
+import contract from '../../lib/release-contract.cjs';
 
 // Supply a Playwright package directory with GARDEN_PLAYWRIGHT_PATH, or install
 // Playwright in your development environment. No browser download is required.
@@ -46,7 +47,7 @@ async function closeApp(app) {
   finally { clearTimeout(timer); activeApps.delete(app); }
 }
 async function start() {
-  server = createApp({ dataDir: join(run, 'service'), cookieSecure: false });
+  server = createApp({ dataDir: join(run, 'service'), cookieSecure: false, releasePollMs: 100 });
   server.listen(port || 0, '127.0.0.1'); await once(server, 'listening'); port = server.address().port;
 }
 async function stop() { if (!server?.listening) return; const closed = once(server, 'close'); server.close(); server.closeIdleConnections(); await closed; }
@@ -130,8 +131,51 @@ try {
   await eventually(async () => assert.equal(await a.panel.locator('.queue-note').count(), 0));
   assert.equal(server.db.prepare('SELECT COUNT(*) AS count FROM projects').get().count, 3);
   await a.panel.locator('.nav-button[data-page=talk]').click(); await a.panel.screenshot({ path: join(output, 'companion-home.png') });
-  await closeApp(a.app);
   console.log('PASS: offline queue survives renderer restart, resends after reconnect, and creates exactly one record.');
+
+  const b3 = await launch(profileB); await b3.panel.locator('#idea-input').waitFor();
+  assert.equal(await a.panel.getByRole('button', {name:'聊一聊',exact:true}).count(),0);
+  await a.panel.locator('.nav-button[data-page=goals]').click();
+  await a.panel.getByRole('button',{name:'发起共同话题',exact:true}).click();
+  const proposal='这个月一起读完一本书，每周分享一个片段。';
+  await a.panel.locator('#goal-proposal-input').fill(proposal);
+  await a.panel.getByRole('button',{name:'提交共同话题'}).click();
+  await a.panel.locator('.idea-row').filter({hasText:'这个月一起读完一本书'}).waitFor();
+  await b3.panel.locator('.nav-button[data-page=goals]').click();
+  await b3.panel.locator('.idea-row').filter({hasText:'这个月一起读完一本书'}).click();
+  await b3.panel.locator('[data-action=consent]').click();
+  await b3.panel.locator('#goal-input').waitFor();
+  assert.equal(await b3.panel.locator('#goal-input').inputValue(),proposal);
+  console.log('PASS: main-window common-topic submit is clickable, pending proposal is visible, peer can confirm.');
+
+  // The server announcement checks metadata; it must leave an active draft intact.
+  await a.panel.locator('.nav-button[data-page=talk]').click();
+  await a.panel.locator('#idea-input').fill('更新提醒到来时，这份草稿仍在。');
+  const version='0.4.1';
+  await writeFile(join(run,'service/desktop-release.json'),JSON.stringify({schemaVersion:1,version,publishedAt:new Date().toISOString(),notes:'测试服务器更新提醒。',assets:Object.fromEntries(Object.entries(contract.assetSuffixes).map(([key,suffix])=>[key,{url:`${contract.source}/releases/download/v${version}/Garden-Companion-${version}-${suffix}`,sha256:'a'.repeat(64),size:100}]))}));
+  await a.panel.locator('.update-notice').waitFor();
+  assert.equal(await a.panel.locator('#idea-input').inputValue(),'更新提醒到来时，这份草稿仍在。');
+  assert.equal((await a.panel.evaluate(()=>window.gardenDesktop.update('status'))).status,'available');
+  await a.panel.locator('.update-notice').click();
+  await a.panel.locator('#software-update').waitFor();
+  assert.match(await a.panel.locator('#software-update').innerText(),/0\.4\.1/);
+  console.log('PASS: server software update notification preserves drafts and waits for user download.');
+
+  await a.panel.getByRole('button',{name:'解除伴侣绑定',exact:true}).click();
+  await a.panel.locator('#garden-unlink-form [name=confirm]').check();
+  await a.panel.getByRole('button',{name:'确认解绑',exact:true}).click();
+  await a.panel.locator('#idea-input').waitFor();
+  await eventually(async()=>assert.equal((await b3.panel.evaluate(()=>window.gardenDesktop.request('/api/state'))).garden.members.length,1));
+  await a.panel.locator('#settings-button').click();
+  await a.panel.locator('[data-action=archive-open]').click();
+  await a.panel.locator('.archive-record summary').filter({hasText:'这个月一起读完一本书'}).click();
+  assert.match(await a.panel.locator('.archive-record[open]').innerText(),/每周分享一个片段/);
+  assert.equal(await a.panel.locator('.archive-record textarea,.archive-record input').count(),0);
+  await b3.panel.locator('#settings-button').click();
+  await b3.panel.locator('[data-action=archive-open]').click();
+  await b3.panel.locator('.archive-record summary').filter({hasText:'这个月一起读完一本书'}).waitFor();
+  console.log('PASS: unlink button works, both members become independent, both retain read-only history.');
+  await closeApp(b3.app);await closeApp(a.app);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ result: 'all desktop flows passed', screenshots: output, run, pageErrors: errors }));
 } catch (error) {

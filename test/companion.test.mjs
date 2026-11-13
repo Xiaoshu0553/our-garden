@@ -94,46 +94,15 @@ test('真实 SSE 在新想法到来时唤醒后台收件；网页创建、回应
   } finally { controller.abort(); await f.cleanup(); }
 });
 
-test('模型整理确实调用配置的接口；保存先完成，人工标题与原话不会被晚来的整理覆盖', async () => {
-  let finish, called;
-  const admitted = new Promise(resolve => { called = resolve; });
-  const provider = createServer(async (request, response) => {
-    let raw = ''; for await (const chunk of request) raw += chunk;
-    const data = JSON.parse(raw); assert.equal(data.model, 'test-model'); assert.equal(request.headers.authorization, 'Bearer test-only-key');
-    if (data.messages.length === 2 && data.messages[0].content.includes('只返回 JSON')) {
-      called(); await new Promise(resolve => { finish = resolve; });
-      response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ title: '模型建议的标题', summary: '一起录播客，先聊一次想讲的故事。' }) } }] }));
-    } else { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ choices: [{ message: { content: '先各自列出一个最想聊的小故事。' } }] })); }
-  });
-  provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
-  const f = await fixture({ companionAI: { baseUrl: `http://127.0.0.1:${provider.address().port}/v1`, model: 'test-model', apiKey: 'test-only-key', timeoutMs: 3000 } });
+test('已删除模型聊天接口，想法始终直接保存原话', async () => {
+  const f = await fixture();
   try {
-    const text = '我想做播客，但还没和对方商量。';
-    const { project } = await f.alice.request('/api/companion/capture', 'POST', { clientId: 'capture-model-001', text });
-    assert.equal(project.capture.aiState, 'pending'); assert.equal(project.description, text);
-    await admitted;
-    await f.alice.request(`/api/projects/${project.id}`, 'PATCH', { title: '我亲自改过的标题' }); finish();
-    await eventually(async () => {
-      const current = (await f.alice.request('/api/state')).projects.find(item => item.id === project.id);
-      assert.equal(current.capture.aiState, 'ready'); assert.equal(current.title, '我亲自改过的标题'); assert.equal(current.capture.originalText, text); assert.equal(current.description, text);
-    });
-    const chat = await f.bob.request('/api/companion/chat', 'POST', { projectId: project.id, messages: [{ role: 'user', content: '下一步可以做什么？' }] });
-    assert.equal(chat.generated, true); assert.equal(chat.reply, '先各自列出一个最想聊的小故事。');
-    const status = await f.bob.request('/api/companion/status'); assert.deepEqual(status, { ai: { configured: true } });
-  } finally { finish?.(); await f.cleanup(); await new Promise(resolve => provider.close(resolve)); }
-});
-
-test('模型失败和未配置时照常记录；聊天不会隐式创建或分享想法', async () => {
-  const provider = createServer((_request, response) => { response.writeHead(500); response.end('provider-internal-detail-not-for-clients'); });
-  provider.listen(0, '127.0.0.1'); await once(provider, 'listening');
-  const f = await fixture({ companionAI: { baseUrl: `http://127.0.0.1:${provider.address().port}`, model: 'broken', timeoutMs: 500 } });
-  try {
-    const { project } = await f.alice.request('/api/companion/capture', 'POST', { clientId: 'capture-failure-001', text: '模型坏了也要留住这个想法。' });
-    await eventually(async () => assert.equal((await f.bob.request('/api/state')).projects.find(item => item.id === project.id).capture.aiState, 'failed'));
-    assert.equal((await f.bob.request('/api/companion/inbox')).unreadCount, 1);
-    await assert.rejects(f.bob.request('/api/companion/chat', 'POST', { messages: [{ role: 'user', content: '聊一聊' }] }), error => error.status === 503 && !error.message.includes('provider-internal'));
-    assert.equal((await f.bob.request('/api/state')).projects.length, 1);
-  } finally { await f.cleanup(); await new Promise(resolve => provider.close(resolve)); }
+    const { project } = await f.alice.request('/api/companion/capture', 'POST', { clientId: 'capture-direct-001', text: '共同话题直接记录，不需要助手。' });
+    assert.equal(project.capture.aiState, 'original');
+    assert.equal(project.description, '共同话题直接记录，不需要助手。');
+    const result = await fetch(f.origin + '/api/companion/chat', { method:'POST', headers:{Cookie:f.alice.cookie,Origin:f.origin,'Content-Type':'application/json','X-CSRF-Token':f.alice.csrf}, body:JSON.stringify({messages:[]}) });
+    assert.equal(result.status,404);
+  } finally { await f.cleanup(); }
 });
 
 test('桌面桥接拒绝任意 URL、危险来源与非白名单 API；桌宠接口保留原有登录和 CSRF 保护', async () => {
@@ -147,6 +116,6 @@ test('桌面桥接拒绝任意 URL、危险来源与非白名单 API；桌宠接
     const anonymous = await fetch(f.origin + '/api/companion/inbox'); assert.equal(anonymous.status, 401);
     const badCSRF = await fetch(f.origin + '/api/companion/capture', { method: 'POST', headers: { Cookie: f.alice.cookie, Origin: f.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ clientId: 'capture-invalid-001', text: '不应保存' }) });
     assert.equal(badCSRF.status, 403); assert.equal((await f.alice.request('/api/state')).projects.length, 0);
-    await assert.rejects(f.alice.request('/api/companion/chat', 'POST', { messages: [{ role: 'system', content: '伪造系统指令' }] }), error => error.status === 400);
+    assert.equal(core.allowedRequest('/api/companion/chat', 'POST'), false);
   } finally { await f.cleanup(); }
 });

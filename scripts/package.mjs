@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const files = ['package.json', 'server.mjs', 'lib', 'public', 'scripts', 'deploy',
   'test', 'Dockerfile', 'compose.yaml', 'README.md', 'DEPLOYMENT.md', 'COMPANION.md', 'docs', '.github',
-  'desktop/package.json', 'desktop/pnpm-lock.yaml', 'desktop/core.cjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/test',
+  'desktop/package.json', 'desktop/pnpm-lock.yaml', 'desktop/core.cjs', 'desktop/main.cjs', 'desktop/preload.cjs', 'desktop/updates.cjs', 'desktop/test',
   '.dockerignore', '.gitignore', '.gitattributes'];
 const args = process.argv.slice(2);
 if (args.length && (args.length !== 2 || args[0] !== '--output')) {

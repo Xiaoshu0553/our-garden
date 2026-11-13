@@ -13,11 +13,24 @@
 </p>
 
 <p align="center">
-  <a href="https://cyberhome.wuhuxiaoshu.com">网页版</a> ·
-  <a href="https://github.com/Xiaoshu0553/our-garden/releases">下载安装包</a> ·
+  <a href="https://github.com/Xiaoshu0553/our-garden/releases/latest">下载 Windows / Mac 软件</a> ·
   <a href="COMPANION.md">桌宠使用说明</a> ·
   <a href="docs/SELF_HOSTING.md">自己部署</a>
 </p>
+
+## 下载安装
+
+这是一款安装在电脑上的桌面宠物软件。请选择对应安装包，使用时不需要安装 Node.js 或开发工具。
+
+| 电脑 | 下载 0.4.0 |
+| --- | --- |
+| Windows 10 / 11，x64 | [安装版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.0/Garden-Companion-0.4.0-win-x64-setup.exe) · [便携版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.0/Garden-Companion-0.4.0-win-x64-portable.exe) |
+| Mac M 系列芯片，macOS 13+ | [Apple Silicon DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.0/Garden-Companion-0.4.0-mac-arm64.dmg) |
+| Mac Intel，macOS 13+ | [Intel DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.0/Garden-Companion-0.4.0-mac-x64.dmg) |
+
+Windows 安装版按向导安装；便携版直接运行。Mac 打开 DMG，将“小花园桌宠”拖入“应用程序”。默认连接共享服务器，两个人分别注册后即可用邀请码连接。
+
+安装包、源码、SHA-256 校验值和原生构建检查记录均位于 [Releases](https://github.com/Xiaoshu0553/our-garden/releases/latest)。当前 Mac 使用 ad-hoc 签名，尚未进行 Apple Developer ID 签名或公证；Windows 安装包也暂未购买代码签名证书。
 
 ## 为什么做这个
 
@@ -46,21 +59,14 @@
 
 - **桌面陪伴**：Windows / macOS，小狗、小猫，可导入自定义静态形象；支持拖动、托盘、快捷键和免打扰。
 - **随手记录**：单击打开快捷卡片，双击或右键打开完整界面；两种窗口分别保留草稿。
-- **注册与配对**：各自注册，用一次性邀请码连接伴侣。每个小花园最多两人，不同小花园的数据相互隔离。
+- **注册与配对**：各自注册，用一次性邀请码连接伴侣；可解除绑定，双方保留各自可查看的只读历史。每个小花园最多两人，不同小花园的数据相互隔离。
 - **双人同步**：共享想法、留言、持久未读与送达 / 已读回执，通过 SSE 接收更新。
-- **共同目标**：双方确认后再推进项目阶段，记录目标、下一步、负责人和完成状态。
+- **共同目标**：直接发起共同话题，等待对方确认后推进目标，记录下一步、负责人和完成状态。
 - **离线待发**：已登录的电脑断网时先保存原话，重连后重发，并避免生成重复记录。
-- **自托管**：Node.js 内置 SQLite，支持 HTTPS、Docker、systemd 和一致性备份。
+- **软件更新**：服务器发布新版本时收到提醒，由用户点击下载；核对安装包大小与 SHA-256 后再打开安装包。
+- **自托管**：客户端默认使用共享服务器，也能连接自己的 HTTPS 服务。
 
-## 下载与使用
-
-在 [Releases](https://github.com/Xiaoshu0553/our-garden/releases) 下载对应平台的包：
-
-| 平台 | 安装包 |
-| --- | --- |
-| Windows x64 | `Garden-Companion-0.3.0-win-x64.exe` |
-| Mac M 系列芯片 | `Garden-Companion-0.3.0-mac-arm64.zip` |
-| Mac Intel | `Garden-Companion-0.3.0-mac-x64.zip` |
+## 两个人开始使用
 
 1. 打开桌宠，双击进入主界面，注册自己的账号。
 2. 在设置里生成伴侣邀请码，把它交给对方。
@@ -71,9 +77,9 @@
 
 桌宠默认连接本项目的线上服务，也可以在设置里填写自己的 HTTPS 小花园地址。Windows 使用 `Ctrl + Shift + Space`，Mac 使用 `⌘ + Shift + Space` 打开快捷卡片。
 
-Mac 需要 macOS 13 或更新版本。当前 Mac 包使用 ad-hoc 开发签名，尚未进行 Apple Developer ID 签名、公证或 Mac 实机验收；Windows 桌面版已完成实际运行检查。
+设置中可检查软件版本。更新提醒不会自动下载；点击“下载并安装”后才开始下载，校验成功后打开对应安装包并退出旧版。Mac 打开 DMG 后仍需将应用拖入“应用程序”完成替换。
 
-## 本地运行
+## 开发与自托管
 
 后端需要 Node.js 24 或更新版本，使用内置 `node:sqlite`，没有第三方运行依赖。
 
@@ -93,7 +99,9 @@ npm install
 npm start
 ```
 
-桌面端也提供 `pnpm-lock.yaml`。Windows 打包执行 `npm run dist:win`；在 Mac 构建环境执行 `npm run dist:mac` 可生成两个 Mac 架构的 ZIP。详细步骤见 [COMPANION.md](COMPANION.md)。
+桌面端也提供 `pnpm-lock.yaml`。Windows 打包执行 `npm run dist:win`，生成安装版和便携版；在 Mac 构建环境执行 `npm run dist:mac`，生成 DMG 和 ZIP。GitHub Actions 的 [Desktop installers](.github/workflows/desktop.yml) 工作流分别在 Windows、Apple Silicon Mac 和 Intel Mac 构建机上生成安装包。详细步骤见 [COMPANION.md](COMPANION.md)。
+
+共享服务是桌宠的配套同步组件，使用 Node.js 内置 SQLite，支持 HTTPS、Docker、systemd 与一致性备份。部署见 [自托管说明](docs/SELF_HOSTING.md)；网页提供辅助访问和开发预览。
 
 ## 技术结构
 
@@ -124,11 +132,11 @@ npm test
 npm run package
 ```
 
-当前有 43 项后端测试，覆盖注册登录、邀请码竞争、跨小花园隔离、会话、原话保留、共同目标和备份恢复。CI 在 Linux 与 Windows 上执行测试及源码包检查。
+当前有 49 项后端与更新测试，覆盖注册登录、邀请码竞争、跨小花园隔离、解绑与历史权限、共同话题、会话、备份恢复、更新提醒与安装包校验。CI 在 Linux 与 Windows 上执行测试及源码包检查。
 
-桌面检查另外覆盖单击 / 双击、双账号同步、离线重发、会话恢复，以及便携 EXE 重复启动后的资源完整性，见 [`desktop/test/`](desktop/test/)。
+桌面检查另外覆盖单击 / 双击、双账号同步、共同话题提交、解绑、只读历史、更新提醒时保留草稿、离线重发、会话恢复，以及便携 EXE 重复启动后的资源完整性，见 [`desktop/test/`](desktop/test/)。Mac 原生构建检查 DMG、应用签名、架构与启动；这些检查不代替两台实体 Mac 的日常使用验收。
 
-当前自定义形象为静态图片；语音、照片生成动画、手机推送、自动更新和宠物跨屏互访尚未接入。
+当前自定义形象为静态图片；语音、照片生成动画、手机推送、静默安装更新和宠物跨屏互访尚未接入。
 
 ---
 

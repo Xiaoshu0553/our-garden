@@ -57,7 +57,6 @@ export function createDemoStore({ initialData, save = () => {}, changed = () => 
         for (const item of data.inbox) if (item.recipientId === userId && item.projectId === body.projectId && !item.readAt) item.deliveredAt = item.readAt = new Date().toISOString();
         commit(); return { ok: true };
       }
-      if (path === '/api/companion/chat' && method === 'POST') return { generated: false, reply: '这里是本机体验空间，还没有连接整理助手。你可以先点「记录并分享」，再切到 TA 的视角，看看这个念头是怎样被接住的。' };
       if (path === '/api/companion/capture' && method === 'POST') {
         const original = text(body.text, 4000);
         if (typeof body.clientId !== 'string' || !/^[a-zA-Z0-9_-]{12,80}$/.test(body.clientId)) fail('记录标识无效。');
@@ -69,7 +68,8 @@ export function createDemoStore({ initialData, save = () => {}, changed = () => 
         }
         if (data.projects.length >= 500) fail('体验空间已有 500 个想法，请先整理。');
         const now = new Date().toISOString();
-        const item = { id: crypto.randomUUID(), title: original.split(/[\r\n。！？!?]/u).find(line => line.trim())?.trim().slice(0, 60) || original.slice(0, 60), description: original, authorId: userId, stage: 'idea', goal: '', consents: [], tasks: [], notes: [], createdAt: now, updatedAt: now, nextReviewAt: null, capture: { originalText: original, summary: '', aiState: 'original' } };
+        const kind = body.kind || 'idea'; if (!['idea','goal'].includes(kind)) fail('记录类型无效。');
+        const item = { id: crypto.randomUUID(), title: original.split(/[\r\n。！？!?]/u).find(line => line.trim())?.trim().slice(0, 60) || original.slice(0, 60), description: original, authorId: userId, stage: 'idea', goal: kind === 'goal' ? original : '', consents: kind === 'goal' ? [userId] : [], tasks: [], notes: [], createdAt: now, updatedAt: now, nextReviewAt: null, capture: { originalText: original, kind, summary: '', aiState: 'original' } };
         data.projects.unshift(item); data.captures[key] = item.id;
         activity(userId, item, 'idea'); commit();
         return { project: structuredClone(item), duplicate: false };

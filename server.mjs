@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { openDatabase, transaction } from './lib/db.mjs';
 import { createCompanion } from './lib/companion.mjs';
 import { createInvitation, gardenFor, joinGarden, registerAccount } from './lib/gardens.mjs';
+import { archivesFor, archiveFor, unlinkGarden } from './lib/archives.mjs';
+import { createDesktopReleases } from './lib/desktop-releases.mjs';
 import {
   HttpError, RateLimiter, assertKeys, equalTokens, hashPassword, resourceUrl,
   reviewDate, secretToken, textField, tokenHash, validateName, validatePassword, verifyPassword,
@@ -239,12 +241,14 @@ export function createApp(options = {}) {
     return value;
   }
 
-  const companion = createCompanion({ db, project, users, getSession, requireAuth, requireMutation, requestBody, json, aiOptions: options.companionAI });
+  const companion = createCompanion({ db, project, users, getSession, requireAuth, requireMutation, requestBody, json });
+  const releases = createDesktopReleases({ filename: join(dataDir,'desktop-release.json'), changed: version => companion.release(version), pollMs: options.releasePollMs ?? 5000 });
 
   async function api(request, response, pathname) {
     noCache(response);
     const method = request.method;
     const session = getSession(request);
+    if (pathname === '/api/desktop/release' && method === 'GET') return json(response, 200, { release: releases.current() });
     if (pathname === '/api/auth/state' && method === 'GET') return json(response, 200, authState(session));
     if (pathname.startsWith('/api/companion/')) return companion.handle(request, response, pathname, session);
 
@@ -266,6 +270,23 @@ export function createApp(options = {}) {
     if (pathname === '/api/garden' && method === 'GET') {
       requireAuth(session);
       return json(response, 200, { garden: gardenFor(db, session.id) });
+    }
+    if (pathname === '/api/garden/unlink' && method === 'POST') {
+      requireMutation(request, session);
+      const body = await requestBody(request);
+      assertKeys(body, ['confirm']);
+      if (body.confirm !== true) throw new HttpError(400, '请先确认解除绑定及记录保留方式。');
+      const result = unlinkGarden(db, session.id);
+      db.prepare('DELETE FROM sessions WHERE user_id=?').run(session.id);
+      const auth = authState(startSession(response, { id: session.id, name: session.name }));
+      companion.changed(result.previousGardenId);
+      for (const id of result.gardenIds) companion.changed(id);
+      return json(response, 200, auth);
+    }
+    const archiveMatch = pathname.match(/^\/api\/garden\/archives\/([a-zA-Z0-9-]{1,80})$/);
+    if (archiveMatch && method === 'GET') {
+      requireAuth(session);
+      return json(response, 200, { archive: archiveFor(db, session.id, archiveMatch[1], project) });
     }
     if (pathname === '/api/garden/invite' && method === 'POST') {
       requireMutation(request, session);
@@ -345,7 +366,7 @@ export function createApp(options = {}) {
     if (pathname === '/api/state' && method === 'GET') {
       requireAuth(session);
       const ids = db.prepare('SELECT id FROM projects WHERE garden_id = ? ORDER BY updated_at DESC, id').all(session.garden_id);
-      return json(response, 200, { users: users(session.garden_id), garden: gardenFor(db, session.id), projects: ids.map((item) => project(item.id, session.garden_id)) });
+      return json(response, 200, { users: users(session.garden_id), garden: gardenFor(db, session.id), archives: archivesFor(db, session.id), projects: ids.map((item) => project(item.id, session.garden_id)) });
     }
 
     if (pathname === '/api/projects' && method === 'POST') {
@@ -576,7 +597,7 @@ export function createApp(options = {}) {
   server.db = db;
   server.garden = { dataDir, publicDir, publicOrigin, cookieSecure };
   const close = server.close.bind(server);
-  server.close = (...args) => { companion.close(); return close(...args); };
+  server.close = (...args) => { releases.close(); companion.close(); return close(...args); };
   server.once('close', () => db.close());
   return server;
 }

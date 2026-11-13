@@ -1,0 +1,21 @@
+// Run the built native application using an isolated profile; never open an installer.
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+const executable=resolve(process.argv[2]);
+const profile=await mkdtemp(join(tmpdir(),'garden-native-smoke-'));
+await writeFile(join(profile,'settings.json'),JSON.stringify({mode:'demo',settingsVersion:2,notifications:false}));
+const child=spawn(executable,[],{windowsHide:true,env:{...process.env,GARDEN_COMPANION_TEST:'1',GARDEN_COMPANION_SMOKE:'1',GARDEN_COMPANION_PROFILE:profile},stdio:['ignore','pipe','pipe']});
+let stdout='',stderr='';child.stdout.on('data',data=>stdout+=data);child.stderr.on('data',data=>stderr+=data);
+const timeout=setTimeout(()=>child.kill(),30000);
+const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);}).finally(()=>clearTimeout(timeout));
+assert.equal(code,0,stderr);
+assert.ok(!stderr.includes('DESKTOP_QA_MAIN_'),stderr);
+const result=stdout.split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(value=>value?.desktopSmoke==='passed');
+assert.ok(result,`Native application did not report readiness. ${stderr}`);
+assert.equal(result.platform,process.platform);assert.equal(result.arch,process.arch);assert.equal(result.petWindow,true);
+const report={...result,checkedAt:new Date().toISOString(),signature:process.platform==='darwin'?'ad-hoc, verified separately with codesign':'unsigned'};
+if(process.argv[3])await writeFile(resolve(process.argv[3]),JSON.stringify(report,null,2)+'\n');
+console.log(JSON.stringify(report));

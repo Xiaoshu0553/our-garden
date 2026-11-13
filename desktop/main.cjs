@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, globalShor
 const { join, resolve } = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const { once } = require('node:events');
+const { DesktopUpdater } = require('./updates.cjs');
 const { serverOrigin, allowedRequest, writeJSON, readJSON, settingsPatch, GardenClient } = require('./core.cjs');
 
 if (process.env.GARDEN_COMPANION_PROFILE) app.setPath('userData', resolve(process.env.GARDEN_COMPANION_PROFILE));
@@ -25,12 +28,14 @@ let eventsTimer;
 let backgroundBusy = false;
 let backgroundAgain = false;
 let authenticated = false;
+let updater, updateTimer;
+let lastUpdateNotice = '';
 const panelUsers = new Map();
 const windowModes = new Map();
 const pendingNotices = new Set();
 const shortcut = 'CommandOrControl+Shift+Space';
 const defaults = { mode: 'connected', settingsVersion: 2, serverUrl: 'https://cyberhome.wuhuxiaoshu.com', pet: 'dog', doNotDisturb: false, notifications: true, openAtLogin: false, demoUserId: 'demo-tree' };
-const info = sender => ({ ...settings, windowId: sender?.id, windowMode: windowModes.get(sender?.id) || 'main', demoUserId: panelUsers.get(sender?.id) || settings.demoUserId, platform: process.platform, shortcut: process.platform === 'darwin' ? '⌘ ⇧ Space' : 'Ctrl Shift Space' });
+const info = sender => ({ ...settings, version: app.getVersion(), update: updater?.snapshot(), windowId: sender?.id, windowMode: windowModes.get(sender?.id) || 'main', demoUserId: panelUsers.get(sender?.id) || settings.demoUserId, platform: process.platform, shortcut: process.platform === 'darwin' ? '⌘ ⇧ Space' : 'Ctrl Shift Space' });
 function saveSettings() { writeJSON(join(dataPath, 'settings.json'), settings); }
 function broadcast(type, data) {
   for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('garden:event', { type, data });
@@ -60,18 +65,21 @@ function startEvents() {
   eventsController?.abort(); clearTimeout(eventsTimer);
   if (!authenticated || settings.mode !== 'connected' || quitting) return;
   const controller = new AbortController(); eventsController = controller;
-  client.events(controller.signal, () => { broadcast('changed'); refreshBackground(); }).catch(() => {}).finally(() => {
+  client.events(controller.signal, event => {
+    if (event?.type === 'release') { updater?.check(); return; }
+    broadcast('changed'); refreshBackground();
+  }).catch(() => {}).finally(() => {
     if (!controller.signal.aborted && !quitting && authenticated) eventsTimer = setTimeout(startEvents, 5000);
   });
 }
 async function requestFor(sender, path, method = 'GET', body) {
   if (!allowedRequest(path, method)) throw new Error('不支持这个小花园操作。');
   const result = settings.mode === 'demo' ? await demo.request(panelUsers.get(sender.id) || settings.demoUserId, path, method, body) : await client.request(path, method, body);
-  if (settings.mode === 'connected' && ['/api/auth/state', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/api/garden/join'].includes(path)) {
+  if (settings.mode === 'connected' && ['/api/auth/state', '/api/auth/login', '/api/auth/register', '/api/auth/me', '/api/garden/join', '/api/garden/unlink'].includes(path)) {
     authenticated = Boolean(result.user); if (authenticated) { startEvents(); refreshBackground(); }
   }
   if (path === '/api/auth/logout') { authenticated = false; eventsController?.abort(); clearTimeout(eventsTimer); unreadCount = 0; updatePet(); }
-  if (['/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/auth/me', '/api/garden/join'].includes(path)) broadcast('connection-changed', { sourceId: sender.id });
+  if (['/api/auth/login', '/api/auth/register', '/api/auth/logout', '/api/auth/me', '/api/garden/join', '/api/garden/unlink'].includes(path)) broadcast('connection-changed', { sourceId: sender.id });
   if (method !== 'GET' && !['/api/companion/inbox/delivered', '/api/companion/chat'].includes(path)) { broadcast('changed'); setImmediate(refreshBackground); }
   return result;
 }
@@ -157,9 +165,41 @@ function showQuick() {
   }
 }
 function togglePanel() { if (quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible()) quickWindow.hide(); else showQuick(); }
+function showUpdateSettings() {
+  if (quitting) return;
+  showPanel();
+  const window = primaryWindow;
+  const send = () => { if (!window.isDestroyed()) window.webContents.send('garden:event', { type: 'show-updates' }); };
+  if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send); else send();
+}
+async function openUpdateInstaller(filename, key) {
+  if (process.env.GARDEN_COMPANION_TEST === '1') throw new Error('自动测试不会启动真实安装程序。');
+  if (key === 'win32-x64-portable') {
+    const script = `$ErrorActionPreference='Stop'; $taskUpdateProcess=Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue; if($taskUpdateProcess){Wait-Process -Id ${process.pid} -Timeout 60}; Start-Process -FilePath $env:GARDEN_UPDATE_TARGET -WindowStyle Hidden`;
+    const child = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(script,'utf16le').toString('base64')], { detached:true,windowsHide:true,stdio:'ignore',env:{...process.env,GARDEN_UPDATE_TARGET:filename} });
+    await once(child,'spawn'); child.unref();
+  } else {
+    const error = await shell.openPath(filename); if (error) throw new Error('未能打开更新安装包。');
+  }
+  quitting = true; setImmediate(() => app.quit());
+}
+function configureUpdater() {
+  updater?.close(); lastUpdateNotice = '';
+  updater = new DesktopUpdater({ version:app.getVersion(), platform:process.platform, arch:process.arch, portable:Boolean(process.env.PORTABLE_EXECUTABLE_FILE), directory:join(dataPath,'updates'), origin:settings.serverUrl, openInstaller:openUpdateInstaller,
+    onChange(state) {
+      broadcast('update-state',state);
+      if (state.status==='available' && state.availableVersion!==lastUpdateNotice && process.env.GARDEN_COMPANION_TEST!=='1' && settings.notifications && !settings.doNotDisturb && Notification.isSupported()) {
+        lastUpdateNotice=state.availableVersion;
+        const notice=new Notification({title:'小花园桌宠有新版本',body:`${state.availableVersion} 已发布，点击查看更新。`,silent:true});
+        notice.on('click',showUpdateSettings);notice.show();
+      }
+    }
+  });
+}
 function menuTemplate() { return [
   { label: '记一个小念头', click: () => showQuick() },
   { label: '打开主界面', click: () => showPanel() },
+  { label: '检查软件更新', click: () => { showUpdateSettings(); updater?.check(); } },
   { label: '显示小伙伴', type: 'checkbox', checked: petWindow?.isVisible(), click: item => item.checked ? petWindow.showInactive() : petWindow.hide() },
   { label: '免打扰', type: 'checkbox', checked: settings.doNotDisturb, click: item => { settings.doNotDisturb = item.checked; saveSettings(); broadcast('settings-changed'); } },
   { type: 'separator' },
@@ -175,6 +215,12 @@ function installIPC() {
     });
   }
   handle('garden:info', sender => info(sender));
+  handle('garden:update', async (_sender, action = 'status') => {
+    if (action === 'status') return updater.snapshot();
+    if (action === 'check') return updater.check();
+    if (action === 'install') return updater.install();
+    throw new Error('不支持这个更新操作。');
+  });
   handle('garden:request', requestFor);
   handle('garden:settings', (_sender, value) => {
     const patch = settingsPatch(value);
@@ -188,7 +234,7 @@ function installIPC() {
   handle('garden:configure', (sender, value) => {
     if (!value || !['demo', 'connected'].includes(value.mode)) throw new Error('请选择连接方式。');
     if (value.mode === 'connected') settings.serverUrl = serverOrigin(value.serverUrl);
-    settings.mode = value.mode; unreadCount = 0; pendingNotices.clear(); saveSettings(); configureClient(); updatePet();
+    settings.mode = value.mode; unreadCount = 0; pendingNotices.clear(); saveSettings(); configureClient(); configureUpdater(); updatePet();
     for (const window of BrowserWindow.getAllWindows()) if (window !== primaryWindow && window !== petWindow && window !== quickWindow) window.destroy();
     if (settings.mode === 'demo') refreshBackground();
     broadcast('connection-changed', { sourceId: sender.id });
@@ -235,6 +281,7 @@ if (hasLock) app.whenReady().then(async () => {
   settings = { ...defaults, ...storedSettings };
   if (storedSettings.settingsVersion !== 2) { settings.mode = 'connected'; settings.settingsVersion = 2; saveSettings(); }
   try { settings.serverUrl = serverOrigin(settings.serverUrl); } catch { settings.serverUrl = defaults.serverUrl; settings.mode = 'demo'; }
+  configureUpdater();
   const { createDemoStore } = await import(pathToFileURL(join(assets, 'demo.mjs')).href);
   demo = createDemoStore({ initialData: readJSON(join(dataPath, 'experience.json'), null), save: data => writeJSON(join(dataPath, 'experience.json'), data), changed: () => { broadcast('changed'); setImmediate(refreshBackground); } });
   configureClient(); installIPC();
@@ -254,7 +301,16 @@ if (hasLock) app.whenReady().then(async () => {
   await restoreSession();
   await refreshBackground();
   if (process.platform === 'darwin') app.dock?.hide();
+  if (process.env.GARDEN_COMPANION_TEST !== '1') {
+    const initial=setTimeout(()=>updater.check(),15000);initial.unref();
+    updateTimer=setInterval(()=>updater.check(),60*60*1000);updateTimer.unref();
+  }
+  if (process.env.GARDEN_COMPANION_SMOKE === '1') {
+    if (petWindow.webContents.isLoading()) await once(petWindow.webContents,'did-finish-load');
+    console.log(JSON.stringify({desktopSmoke:'passed',version:app.getVersion(),platform:process.platform,arch:process.arch,petWindow:!petWindow.isDestroyed()}));
+    quitting=true;setTimeout(()=>app.quit(),1000);
+  }
 }).catch(error => { console.error('小伙伴启动失败：', error.code || error.name); app.quit(); });
 app.on('second-instance', () => showQuick());
 app.on('window-all-closed', () => { /* The tray owns the lifetime. */ });
-app.on('before-quit', () => { quitting = true; eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });
+app.on('before-quit', () => { quitting = true; updater?.close(); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });

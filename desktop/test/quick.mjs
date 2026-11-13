@@ -51,9 +51,6 @@ try {
   await pet.locator('#pet-hit').dblclick();
   assert.equal(await main.locator('#idea-input').inputValue(), '主界面的草稿也要好好保留。');
   await pet.locator('#pet-hit').click();
-  await quick.locator('[data-mode=chat]').click(); await quick.locator('#idea-input').fill('帮我想一个很小的下一步。');
-  await quick.locator('#compose-form button[type=submit]').click(); await quick.locator('.chat-message:not(.mine)').waitFor();
-  assert.ok((await windowState()).find(w => w.title === '小花园 · 快捷记录').bounds.height >= 400);
   await app.evaluate(({ Menu }) => { globalThis.gardenOriginalPopup = Menu.prototype.popup; Menu.prototype.popup = function () { globalThis.gardenTestMenu = this; }; });
   await pet.locator('#pet-hit').dispatchEvent('contextmenu');
   await eventually(async () => assert.ok((await app.evaluate(() => globalThis.gardenTestMenu?.items.map(item => item.label))).includes('打开主界面')));
@@ -61,5 +58,5 @@ try {
   await eventually(async () => assert.equal((await windowState()).find(w => w.title === '小花园 · 快捷记录').visible, false));
   await app.evaluate(({ Menu }) => { Menu.prototype.popup = globalThis.gardenOriginalPopup; });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: 'PASS: pet-only startup, single-click quick capture, double-click main, right-click main entry, separate drafts, quick share, and chat resize', screenshot: join(out, 'quick-popup.png') }));
+  console.log(JSON.stringify({ result: 'PASS: pet-only startup, single-click quick capture, double-click main, right-click main entry, separate drafts, quick share, and no AI chat entry', screenshot: join(out, 'quick-popup.png') }));
 } finally { await app.close(); }

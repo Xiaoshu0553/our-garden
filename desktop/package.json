@@ -1,6 +1,6 @@
 {
   "name": "garden-companion",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "两个人的小花园桌宠：随手记住想法，轻轻带给对方",
   "main": "main.cjs",
@@ -8,8 +8,8 @@
   "scripts": {
     "start": "electron .",
     "pack:win": "electron-builder --win --dir",
-    "dist:win": "electron-builder --win portable",
-    "dist:mac": "electron-builder --mac zip --arm64 --x64"
+    "dist:win": "electron-builder --win nsis portable",
+    "dist:mac": "electron-builder --mac dmg zip --arm64 --x64"
   },
   "devDependencies": {
     "electron": "45.3.1",
@@ -19,11 +19,13 @@
     "appId": "com.ourlittlegarden.companion",
     "productName": "小花园桌宠",
     "directories": { "output": "../.local/desktop-release" },
-    "files": ["main.cjs", "preload.cjs", "core.cjs", "package.json"],
+    "files": ["main.cjs", "preload.cjs", "core.cjs", "updates.cjs", "package.json", {"from":"../lib","to":".","filter":["release-contract.cjs"]}],
     "extraResources": [{ "from": "../public/companion", "to": "companion" }],
-    "win": { "target": "portable", "signAndEditExecutable": false },
-    "portable": { "unpackDirName": true },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.lifestyle" },
+    "win": { "target": ["nsis","portable"], "signAndEditExecutable": false },
+    "nsis": {"oneClick":false,"perMachine":false,"allowElevation":false,"allowToChangeInstallationDirectory":true,"deleteAppDataOnUninstall":false,"artifactName":"Garden-Companion-${version}-win-${arch}-setup.${ext}"},
+    "portable": { "unpackDirName": true, "artifactName":"Garden-Companion-${version}-win-${arch}-portable.${ext}" },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.lifestyle", "identity":"-", "notarize":false },
+    "dmg": {"title":"小花园桌宠 ${version}","window":{"width":540,"height":380},"contents":[{"x":130,"y":220,"type":"file"},{"x":410,"y":220,"type":"link","path":"/Applications"}]},
     "artifactName": "Garden-Companion-${version}-${os}-${arch}.${ext}"
   }
 }

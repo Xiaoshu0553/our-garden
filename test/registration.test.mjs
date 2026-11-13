@@ -55,7 +55,7 @@ test('自行注册、校验确认密码、重复昵称、自动登录、退出�
   const login=await a.request('/api/auth/login','POST',{name:'FirstMember',password});assert.equal(login.status,200);assert.match(login.response.headers.get('set-cookie'),/HttpOnly/);assert.match(login.response.headers.get('set-cookie'),/SameSite=Strict/);assert.equal(login.response.headers.get('cache-control'),'no-store');
 });
 
-test('不同小花园隔离成员、项目、分工、留言、通知、AI 上下文和实时事件',async t=>{
+test('不同小花园隔离成员、项目、分工、留言、通知和实时事件',async t=>{
   const f=await fixture(t);const a=f.client(),b=f.client();const aa=await a.register('花园甲');const bb=await b.register('花园乙');
   const pa=await a.idea('甲的私密想法'),pb=await b.idea('乙的私密想法');
   const own=await a.request('/api/state');assert.deepEqual(own.data.users.map(u=>u.id),[aa.user.id]);assert.deepEqual(own.data.projects.map(p=>p.id),[pa.id]);
@@ -103,14 +103,6 @@ test('桌面传输支持注册和配对，会话轮换后继续同步且不向�
   const {invite}=await a.request('/api/garden/invite','POST',{});await b.request('/api/garden/join','POST',{code:invite.code});assert.notEqual(stored,before);
   assert.equal((await b.request('/api/auth/state')).garden.id,aa.garden.id);
   await b.request('/api/companion/capture','POST',{text:'桌面注册后一起记住',clientId:secretToken()});assert.equal((await a.request('/api/state')).projects.length,1);
-});
-
-test('未指定项目的 AI 对话只取得当前小花园的目标',async t=>{
-  let seen='';const provider=createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;const parsed=JSON.parse(body);if(parsed.messages.at(-1)?.content==='测试当前小花园上下文')seen=JSON.stringify(parsed.messages);res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({choices:[{message:{content:JSON.stringify({title:'整理后的标题',summary:'测试摘要'})}}]}));});
-  provider.listen(0,'127.0.0.1');await once(provider,'listening');t.after(()=>new Promise(resolve=>provider.close(resolve)));
-  const f=await fixture(t,{companionAI:{baseUrl:`http://127.0.0.1:${provider.address().port}/v1`,model:'fixture-model'}});const a=f.client(),b=f.client();await a.register('AI甲');await b.register('AI乙');const pa=await a.idea('AI甲的想法'),pb=await b.idea('AI乙的想法');
-  await a.request(`/api/projects/${pa.id}`,'PATCH',{goal:'甲可以看见的目标'});await b.request(`/api/projects/${pb.id}`,'PATCH',{goal:'乙不能泄露的目标'});
-  const reply=await a.request('/api/companion/chat','POST',{messages:[{role:'user',content:'测试当前小花园上下文'}]});assert.equal(reply.status,200);assert.equal(reply.data.generated,true);assert.match(seen,/甲可以看见的目标/);assert.doesNotMatch(seen,/乙不能泄露的目标/);
 });
 
 test('两个请求同时使用邀请码，最多一人加入，失败请求不会留下多余账号',async t=>{

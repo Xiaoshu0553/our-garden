@@ -1,0 +1,150 @@
+name: Desktop installers
+
+on:
+  push:
+    branches: ['release/**']
+  workflow_dispatch:
+    inputs:
+      prepare_release:
+        description: Prepare a draft release after native checks pass
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            platform: win32
+            arch: x64
+          - name: macOS Apple Silicon
+            os: macos-15
+            platform: darwin
+            arch: arm64
+          - name: macOS Intel
+            os: macos-15-intel
+            platform: darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Backend regression
+        run: npm test
+      - name: Install pinned desktop dependencies
+        working-directory: desktop
+        run: npm install --no-audit --no-fund
+      - name: Build Windows setup and portable
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        run: npx --no-install electron-builder --win nsis portable --x64 --publish never --config.directories.output=../.local/installers
+      - name: Build native Mac DMG
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        run: npx --no-install electron-builder --mac dmg --${{ matrix.arch }} --publish never --config.directories.output=../.local/installers
+      - name: Verify Mac disk image, signature, architecture and native startup
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./desktop/package.json').version")
+          image="$PWD/.local/installers/Garden-Companion-$version-mac-${{ matrix.arch }}.dmg"
+          mount="$RUNNER_TEMP/garden-dmg"
+          mkdir -p "$mount"
+          hdiutil verify "$image"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          test -L "$mount/Applications"
+          app="$mount/小花园桌宠.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          exe="$app/Contents/MacOS/小花园桌宠"
+          file "$exe"
+          if [ '${{ matrix.arch }}' = arm64 ]; then file "$exe" | grep arm64; else file "$exe" | grep x86_64; fi
+          node desktop/test/smoke.mjs "$exe" ".local/installers/native-darwin-${{ matrix.arch }}.json"
+      - name: Verify Windows native startup and packaged interaction
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD '.local/installers/win-unpacked/小花园桌宠.exe'
+          node desktop/test/smoke.mjs $exe '.local/installers/native-win32-x64.json'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm install --prefix .local/qa-deps --no-audit --no-fund playwright@1.62.1
+          $env:GARDEN_PLAYWRIGHT_PATH = Join-Path $PWD '.local/qa-deps/node_modules/playwright'
+          $env:GARDEN_ELECTRON_EXECUTABLE = $exe
+          $env:GARDEN_PACKAGED = '1'
+          node desktop/test/quick.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node desktop/test/e2e.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $version = (Get-Content desktop/package.json | ConvertFrom-Json).version
+          $env:GARDEN_PORTABLE_EXECUTABLE = Join-Path $PWD ".local/installers/Garden-Companion-$version-win-x64-portable.exe"
+          node desktop/test/portable.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            .local/installers/*.exe
+            .local/installers/*.dmg
+            .local/installers/native-*.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  draft:
+    name: Prepare verified draft release
+    needs: native
+    if: github.event_name == 'push' || inputs.prepare_release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-*
+          path: .local/release
+          merge-multiple: true
+      - name: Prepare checksums, source and update manifest
+        run: |
+          version=$(node -p "require('./desktop/package.json').version")
+          node scripts/package.mjs --output ".local/release/Garden-Companion-$version-source.tar.gz"
+          node scripts/desktop-release.mjs .local/release
+      - name: Upload draft, preserving final publication for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./desktop/package.json').version")
+          if gh release view "v$version" --json isDraft >/dev/null 2>&1; then
+            test "$(gh release view "v$version" --json isDraft --jq .isDraft)" = true
+            gh release edit "v$version" --target "$GITHUB_SHA" --notes-file "docs/releases/$version.md"
+          else
+            gh release create "v$version" --draft --target "$GITHUB_SHA" --title "小花园桌宠 $version · Windows / macOS" --notes-file "docs/releases/$version.md"
+          fi
+          gh release upload "v$version" --clobber .local/release/*.exe .local/release/*.dmg .local/release/*source.tar.gz .local/release/SHA256SUMS.txt .local/release/desktop-release.json ".local/release/verification-$version.json"

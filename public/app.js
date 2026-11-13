@@ -1,4 +1,4 @@
-import { renderAccountForm, renderPairing, copyInvitation } from './companion/accounts-ui.mjs';
+import { renderAccountForm, renderPairing, copyInvitation, renderUnlinkConfirmation, renderArchiveLinks, renderArchive } from './companion/accounts-ui.mjs';
 const app = document.getElementById('app');
 const projectDialog = document.getElementById('project-dialog');
 const editorDialog = document.getElementById('editor-dialog');
@@ -7,7 +7,7 @@ const toastElement = document.getElementById('toast');
 const stages = { idea: '想聊聊', exploring: '一起探索', active: '正在行动', completed: '一起完成', paused: '先放一放' };
 const pages = { home: ['小院', 'home'], ideas: ['灵感墙', 'note'], projects: ['一起推进', 'sprout'], memories: ['回忆书架', 'book'] };
 const noteLabels = { comment: '讨论', resource: '资料', decision: '决定' };
-const state = { user: null, garden: null, invite: null, authMode: 'login', csrfToken: '', setupRequired: false, demo: false, users: [], projects: [], page: 'home', filter: 'all', search: '', projectId: null, noteKind: 'comment', offline: false };
+const state = { user: null, archives: [], garden: null, invite: null, authMode: 'login', csrfToken: '', setupRequired: false, demo: false, users: [], projects: [], page: 'home', filter: 'all', search: '', projectId: null, noteKind: 'comment', offline: false };
 let toastTimer;
 let confirmAction;
 let refreshPending = false;
@@ -106,7 +106,7 @@ async function api(path, method = 'GET', body) {
 }
 async function loadState() {
   const data = await api('/api/state');
-  state.users = data.users; state.garden = data.garden || null;
+  state.users = data.users; state.garden = data.garden || null; state.archives = data.archives || [];
   state.projects = data.projects;
   const updated = data.users.find(item => item.id === state.user?.id);
   if (updated) state.user = updated;
@@ -262,7 +262,7 @@ function confirm(title, copy, action) {
   showDialog(editorDialog);
 }
 function renderProfile() {
-  profileDialog.innerHTML = `<div class="dialog-top"><span class="eyebrow">YOUR LITTLE CORNER</span><button class="icon-button" type="button" data-close="profile-dialog" aria-label="关闭我的设置">${icon('close')}</button></div><div class="editor-body"><h2>你的小小角落</h2><p>${state.demo ? '这里的修改只影响当前示例，回到登录后就会清空。' : '给自己换个昵称，也可以更新小院的登录密码。'}</p><form data-form="profile"><label class="field">小院里的名字<input name="name" maxlength="40" value="${escape(state.user.name)}" autocomplete="username" required></label>${!state.demo ? '<div class="profile-divider"></div><label class="field">当前密码<input name="currentPassword" type="password" autocomplete="current-password" maxlength="256" placeholder="修改密码时填写"></label><label class="field">新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="至少 12 个字符，留空就保持原密码"></label><label class="field">再确认一次新密码<input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="再输入一次新密码"></label>' : ''}<p class="form-error" data-error role="alert" hidden></p><div class="editor-actions"><button class="btn primary" type="submit">保存设置 ${icon('check')}</button></div></form>${!state.demo ? `<section id="pairing-settings" class="garden-pairing">${renderPairing(state.garden, state.invite)}</section>` : ''}<div class="profile-divider"></div><div class="profile-tools"><button class="btn quiet compact" type="button" data-action="export-all">${icon('download')} 导出我们的记录</button><button class="btn quiet compact" type="button" data-action="logout">${icon('logout')} ${state.demo ? '回到登录' : '退出小院'}</button></div></div>`;
+  profileDialog.innerHTML = `<div class="dialog-top"><span class="eyebrow">YOUR LITTLE CORNER</span><button class="icon-button" type="button" data-close="profile-dialog" aria-label="关闭我的设置">${icon('close')}</button></div><div class="editor-body"><h2>你的小小角落</h2><p>${state.demo ? '这里的修改只影响当前示例，回到登录后就会清空。' : '给自己换个昵称，也可以更新小院的登录密码。'}</p><form data-form="profile"><label class="field">小院里的名字<input name="name" maxlength="40" value="${escape(state.user.name)}" autocomplete="username" required></label>${!state.demo ? '<div class="profile-divider"></div><label class="field">当前密码<input name="currentPassword" type="password" autocomplete="current-password" maxlength="256" placeholder="修改密码时填写"></label><label class="field">新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="至少 12 个字符，留空就保持原密码"></label><label class="field">再确认一次新密码<input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="12" maxlength="256" placeholder="再输入一次新密码"></label>' : ''}<p class="form-error" data-error role="alert" hidden></p><div class="editor-actions"><button class="btn primary" type="submit">保存设置 ${icon('check')}</button></div></form>${!state.demo ? `<section id="pairing-settings" class="garden-pairing">${renderPairing(state.garden, state.invite)}</section>` : ''}<div class="profile-divider"></div>${!state.demo ? renderArchiveLinks(state.archives) : ''}<div class="profile-tools"><button class="btn quiet compact" type="button" data-action="export-all">${icon('download')} 导出我们的记录</button><button class="btn quiet compact" type="button" data-action="logout">${icon('logout')} ${state.demo ? '回到登录' : '退出小院'}</button></div></div>`;
   showDialog(profileDialog);
 }
 function download(data, filename) {
@@ -347,6 +347,10 @@ document.addEventListener('click', async event => {
   const project = state.projects.find(item => item.id === state.projectId);
   try {
     switch (action) {
+      case 'unlink-open': document.getElementById('pairing-settings').innerHTML=renderUnlinkConfirmation(); break;
+      case 'unlink-cancel': document.getElementById('pairing-settings').innerHTML=renderPairing(state.garden,state.invite); break;
+      case 'archive-open': { const result=await api('/api/garden/archives/'+target.dataset.id);profileDialog.close();editorDialog.innerHTML='<div class="editor-body">'+renderArchive(result.archive)+'</div>';showDialog(editorDialog);break; }
+      case 'archive-back': editorDialog.close();renderProfile();break;
       case 'auth-mode': state.authMode = target.dataset.mode === 'register' ? 'register' : 'login'; renderLogin(); break;
       case 'create-invite': {
         target.disabled = true; const result = await api('/api/garden/invite', 'POST', {}); state.invite = result.invite;
@@ -419,6 +423,9 @@ document.addEventListener('submit', event => {
         state.invite = null; state.authMode = 'login';
         Object.assign(state, auth, { demo: false, page: 'home', filter: 'all', search: '' });
         await loadState(); renderShell(); openLinkedProject(); if (kind === 'register' && state.garden?.canInvite) renderProfile(); break;
+      }
+      case 'garden-unlink': {
+        const auth=await api('/api/garden/unlink','POST',{confirm:values.confirm==='yes'});Object.assign(state,auth);state.invite=null;await loadState();profileDialog.close();renderShell();toast('已解除绑定，过去的共同记录保存在设置中。');break;
       }
       case 'garden-join': {
         const auth = await api('/api/garden/join', 'POST', { code: values.code, shareExisting: values.shareExisting === 'yes' });

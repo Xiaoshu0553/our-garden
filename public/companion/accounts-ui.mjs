@@ -16,7 +16,7 @@ export function renderPairing(garden, invite, pendingCount = 0) {
   if (!garden) return '';
   const members = garden.members || [];
   const people = `<div class="garden-members">${members.map(member => `<span class="garden-member"><span aria-hidden="true">${escape(Array.from(member.name)[0])}</span>${escape(member.name)}</span>`).join('<span aria-hidden="true">♡</span>')}</div>`;
-  if (members.length === 2) return `<h2>我们已经连接好了</h2>${people}<p class="garden-account-help">想法、共同目标和新消息，都只在你们两人之间同步。</p>`;
+  if (members.length === 2) return `<h2>我们已经连接好了</h2>${people}<p class="garden-account-help">想法、共同目标和新消息，都只在你们两人之间同步。</p><button type="button" class="danger-link" data-action="unlink-open">解除伴侣绑定</button>`;
   const existing = (garden.projectCount || 0) + pendingCount;
   return `<h2>邀请伴侣，一起入住</h2>${people}<p class="garden-account-help">把邀请码发给伴侣，TA 可以在注册时填写，也可以登录后在这里加入。加入后，TA 能看到这个小花园已有的记录。</p>
     ${invite ? `<label class="field">伴侣邀请码<div class="garden-code-row"><input id="garden-invite-code" value="${escape(invite.code)}" readonly aria-label="伴侣邀请码"><button type="button" class="btn soft tiny" data-action="copy-invite">复制</button></div></label><p class="garden-account-help">有效至 ${escape(new Date(invite.expiresAt).toLocaleString('zh-CN', { hour12: false }))}，只能使用一次。</p>` : ''}
@@ -36,4 +36,18 @@ export async function copyInvitation(invite) {
     const input = document.getElementById('garden-invite-code'); input?.focus(); input?.select();
     return '邀请码已选中，按 Ctrl+C（Mac 为 ⌘C）复制。';
   }
+}
+
+export function renderUnlinkConfirmation() {
+  return `<h2>解除伴侣绑定</h2><p class="garden-account-help">解绑后，两个人会各自回到独立的小花园。新的想法和目标不再互相可见；过去的共同记录会保留为双方各自可查看的只读历史，不会交给以后连接的伴侣。</p><form id="garden-unlink-form" data-form="garden-unlink"><label class="garden-share-consent"><input type="checkbox" name="confirm" value="yes" required><span>我已了解记录保留方式，确认解除当前绑定。</span></label><p class="form-error error-text" data-error role="alert" hidden></p><div class="form-actions"><button type="button" class="btn soft tiny" data-action="unlink-cancel">暂不解绑</button><button type="submit" class="btn tiny danger-link">确认解绑</button></div></form>`;
+}
+
+export function renderArchiveLinks(archives = []) {
+  return archives.length ? `<section class="garden-pairing"><h2>过去的共同记录</h2>${archives.map(item => `<button type="button" class="text-link archive-link" data-action="archive-open" data-id="${escape(item.id)}">${escape(item.participants.map(p => p.name).join(' 与 '))} · ${item.projectCount} 条记录</button>`).join('')}</section>` : '';
+}
+
+export function renderArchive(archive) {
+  const names = new Map(archive.participants.map(p => [p.id, p.name]));
+  const person = id => escape(names.get(id) || '当时的成员');
+  return `<button type="button" class="back" data-action="archive-back">返回设置</button><h1 class="settings-title">过去的共同记录</h1><p class="garden-account-help">${escape(archive.participants.map(p => p.name).join(' 与 '))} · 已于 ${escape(new Date(archive.archivedAt).toLocaleDateString('zh-CN'))} 归档。这些记录仅当时的两个人可查看，内容保持只读。</p>${archive.projects.length ? archive.projects.map(item => `<details class="archive-record"><summary>${escape(item.title)}</summary><p class="garden-account-help">${person(item.authorId)} 留下的</p><p class="original">${escape(item.capture?.originalText || item.description)}</p>${item.goal ? `<h3>当时的共同目标</h3><p class="original">${escape(item.goal)}</p>` : ''}${item.tasks.map(task => `<p>${task.done ? '☑' : '☐'} ${escape(task.text)} · ${task.assigneeId ? person(task.assigneeId) : '未分工'}</p>`).join('')}${item.notes.map(note => `<article class="note"><small>${person(note.authorId)} · ${escape(new Date(note.createdAt).toLocaleDateString('zh-CN'))}</small><p>${escape(note.text)}</p></article>`).join('')}</details>`).join('') : '<p class="garden-account-help">当时还没有留下共同记录。</p>'}`;
 }

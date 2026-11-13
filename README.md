@@ -4,6 +4,8 @@
 
 <p align="center">桌面上一只小伙伴，替两个人记住想法。</p>
 
+<p align="center">情侣桌宠 · 共享想法 · 共同目标</p>
+
 <p align="center">
   <a href="https://github.com/Xiaoshu0553/our-garden/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Xiaoshu0553/our-garden/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Node.js 24+" src="https://img.shields.io/badge/Node.js-24%2B-657957">
@@ -18,6 +20,8 @@
 </p>
 
 ## 为什么做这个
+
+小花园是一款面向情侣的桌面宠物与双人协作工具。两个人各自注册，通过邀请码连接，在各自的电脑上记录灵感、接收对方的提醒，一起整理想做的事。
 
 两个人经常会突然想到一件想一起做的事：录一期播客、安排一趟旅行，或者养成一个小习惯。念头散落在聊天里，很容易被后来的消息盖住。
 
@@ -46,7 +50,6 @@
 - **双人同步**：共享想法、留言、持久未读与送达 / 已读回执，通过 SSE 接收更新。
 - **共同目标**：双方确认后再推进项目阶段，记录目标、下一步、负责人和完成状态。
 - **离线待发**：已登录的电脑断网时先保存原话，重连后重发，并避免生成重复记录。
-- **可选 AI 助手**：接入 Chat Completions 兼容 API，整理标题、摘要或聊下一步；模型不可用时仍可保存和分享。
 - **自托管**：Node.js 内置 SQLite，支持 HTTPS、Docker、systemd 和一致性备份。
 
 ## 下载与使用
@@ -92,18 +95,6 @@ npm start
 
 桌面端也提供 `pnpm-lock.yaml`。Windows 打包执行 `npm run dist:win`；在 Mac 构建环境执行 `npm run dist:mac` 可生成两个 Mac 架构的 ZIP。详细步骤见 [COMPANION.md](COMPANION.md)。
 
-## AI 配置
-
-在共享服务的私有环境变量中设置：
-
-```dotenv
-COMPANION_AI_BASE_URL=https://your-provider.example/v1
-COMPANION_AI_MODEL=your-model
-COMPANION_AI_KEY=your-private-key
-```
-
-模型密钥保留在服务端，客户端不需要填写。未配置时，记录、分享、目标和通知照常使用，“聊一聊”会提示助手未连接。聊天本身不会替人创建共同目标或自动分享。
-
 ## 技术结构
 
 ```mermaid
@@ -112,7 +103,6 @@ flowchart LR
   M[Mac 桌宠] -->|HTTPS| S
   B[网页] -->|HTTPS| S
   S --> D[(SQLite)]
-  S -->|可选| A[模型 API]
   S -->|SSE 更新| W
   S -->|SSE 更新| M
 ```
@@ -122,7 +112,7 @@ flowchart LR
 | `desktop/` | Electron 主进程、安全桥接与桌面检查 |
 | `public/companion/` | 桌宠界面、注册配对、猫狗形象与本机演示 |
 | `public/` | 网页协作界面 |
-| `lib/` | SQLite、账号、小花园隔离、同步与模型适配 |
+| `lib/` | SQLite、账号、小花园隔离与同步 |
 | `test/` | 后端、权限、迁移、备份与注册检查 |
 | `deploy/` | HTTPS、Docker、systemd 与恢复模板 |
 | `docs/` | 项目截图与自托管说明 |

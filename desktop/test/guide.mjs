@@ -100,7 +100,9 @@ try {
   assert.equal(application.windows().filter(isGuide).length, 1);
   console.log('PASS: reopening help reuses one guide window.');
 
-  await guide.close();
+  // Close the native window as its title-bar button does. Closing the CDP page
+  // can close the debugging transport itself in some packaged Electron builds.
+  await application.evaluate(({BrowserWindow},id)=>BrowserWindow.fromId(id).close(),native.id);
   await eventually(() => assert.equal(application.windows().filter(isGuide).length, 0));
   await application.evaluate(({ app }, root) => app.emit('second-instance', {}, ['--guide'], root), root);
   const reopened = await guidePage();

@@ -151,14 +151,14 @@ try {
   // The server announcement checks metadata; it must leave an active draft intact.
   await a.panel.locator('.nav-button[data-page=talk]').click();
   await a.panel.locator('#idea-input').fill('更新提醒到来时，这份草稿仍在。');
-  const version='0.4.2';
+  const version='0.4.3';
   await writeFile(join(run,'service/desktop-release.json'),JSON.stringify({schemaVersion:1,version,publishedAt:new Date().toISOString(),notes:'测试服务器更新提醒。',assets:Object.fromEntries(Object.entries(contract.assetSuffixes).map(([key,suffix])=>[key,{url:`${contract.source}/releases/download/v${version}/Garden-Companion-${version}-${suffix}`,sha256:'a'.repeat(64),size:100}]))}));
   await a.panel.locator('.update-notice').waitFor();
   assert.equal(await a.panel.locator('#idea-input').inputValue(),'更新提醒到来时，这份草稿仍在。');
   assert.equal((await a.panel.evaluate(()=>window.gardenDesktop.update('status'))).status,'available');
   await a.panel.locator('.update-notice').click();
   await a.panel.locator('#software-update').waitFor();
-  assert.match(await a.panel.locator('#software-update').innerText(),/0\.4\.2/);
+  assert.match(await a.panel.locator('#software-update').innerText(),/0\.4\.3/);
   console.log('PASS: server software update notification preserves drafts and waits for user download.');
 
   await a.panel.getByRole('button',{name:'解除伴侣绑定',exact:true}).click();

@@ -2,16 +2,18 @@
 
 小花园是安装在 Windows / Mac 电脑上的情侣桌面宠物软件。它替两个人记录想法、同步留言，等双方都愿意后，再一起推进共同目标。
 
+第一次使用可打开[图文使用教程](docs/使用教程.html)。安装包里也附带教程，右键宠物或托盘图标选择“使用教程”即可离线查看。
+
 ## 安装和开始
 
 从 [Releases](https://github.com/Xiaoshu0553/our-garden/releases/latest) 下载：
 
 | 电脑 | 文件 |
 | --- | --- |
-| Windows x64 安装版 | `Garden-Companion-0.4.1-win-x64-setup.exe` |
-| Windows x64 便携版 | `Garden-Companion-0.4.1-win-x64-portable.exe` |
-| Mac M 系列芯片 | `Garden-Companion-0.4.1-mac-arm64.dmg` |
-| Mac Intel | `Garden-Companion-0.4.1-mac-x64.dmg` |
+| Windows x64 安装版 | `Garden-Companion-0.4.2-win-x64-setup.exe` |
+| Windows x64 便携版 | `Garden-Companion-0.4.2-win-x64-portable.exe` |
+| Mac M 系列芯片 | `Garden-Companion-0.4.2-mac-arm64.dmg` |
+| Mac Intel | `Garden-Companion-0.4.2-mac-x64.dmg` |
 
 Windows 安装版按向导安装，便携版直接运行。Mac 需要 macOS 13+，打开 DMG 后，将“小花园桌宠”拖入“应用程序”。软件本身不需要另外安装 Node.js。首次从旧版升级前，请从旧版宠物的右键菜单退出旧版。
 
@@ -19,7 +21,8 @@ Mac 包使用 ad-hoc 签名，尚未进行 Apple Developer ID 签名或公证。
 
 ## 宠物怎样操作
 
-- 启动只显示宠物。单击小狗或小猫，弹出快捷记录卡片；点别处收起，草稿保留。
+- 启动时，在当前鼠标所在屏幕的右下角显示宠物。单击小狗或小猫，弹出快捷记录卡片；点别处收起，草稿保留。
+- 找不到宠物时，再次打开程序，或右键托盘图标选择“找回小伙伴”。切换显示器后，软件会把屏幕外的宠物移回可见区域。
 - 双击宠物，或右键选择“打开主界面”，查看记录、共同目标和设置。
 - Windows 用 `Ctrl + Shift + Space`，Mac 用 `⌘ + Shift + Space` 随时打开快捷卡片。
 - 拖动宠物可以挪位置；右键宠物或托盘菜单可以退出程序。主界面的收起键只隐藏面板，宠物和收件继续运行。

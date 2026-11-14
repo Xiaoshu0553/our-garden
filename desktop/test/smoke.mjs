@@ -16,6 +16,7 @@ assert.ok(!stderr.includes('DESKTOP_QA_MAIN_'),stderr);
 const result=stdout.split(/\r?\n/).map(line=>{try{return JSON.parse(line);}catch{return null;}}).find(value=>value?.desktopSmoke==='passed');
 assert.ok(result,`Native application did not report readiness. ${stderr}`);
 assert.equal(result.platform,process.platform);assert.equal(result.arch,process.arch);assert.equal(result.petWindow,true);
+assert.equal(result.petRendered,true);assert.equal(result.petVisible,true);assert.equal(result.petOnScreen,true);
 const report={...result,checkedAt:new Date().toISOString(),signature:process.platform==='darwin'?'ad-hoc, verified separately with codesign':'unsigned'};
 if(process.argv[3])await writeFile(resolve(process.argv[3]),JSON.stringify(report,null,2)+'\n');
 console.log(JSON.stringify(report));

@@ -30,6 +30,9 @@ let backgroundAgain = false;
 let authenticated = false;
 let updater, updateTimer;
 let lastUpdateNotice = '';
+let petWantedVisible = true;
+let pendingPetReset = true;
+let petRecoveryTimer;
 const panelUsers = new Map();
 const windowModes = new Map();
 const pendingNotices = new Set();
@@ -113,6 +116,30 @@ function secureWindow(window, filename) {
   window.webContents.on('will-attach-webview', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.loadFile(join(assets, filename));
+}
+function petPlacement(resetPosition = false) {
+  const current = petWindow?.getBounds();
+  if (current && !resetPosition && screen.getAllDisplays().some(({ workArea: a }) =>
+    current.x >= a.x && current.y >= a.y && current.x + current.width <= a.x + a.width && current.y + current.height <= a.y + a.height)) return current;
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const width = Math.min(176, area.width), height = Math.min(196, area.height);
+  return { width, height, x: area.x + Math.max(0, area.width - width - 16), y: area.y + Math.max(0, area.height - height - 8) };
+}
+function showPet(resetPosition = false) {
+  petWantedVisible = true;
+  pendingPetReset ||= resetPosition;
+  if (!petWindow || petWindow.isDestroyed() || quitting) return;
+  petWindow.setBounds(petPlacement(pendingPetReset)); pendingPetReset = false;
+  if (petWindow.isMinimized()) petWindow.restore();
+  petWindow.setAlwaysOnTop(true);
+  petWindow.showInactive(); petWindow.moveTop(); updatePet();
+}
+function recoverPetDisplay() {
+  if (petWantedVisible && petWindow && !petWindow.isDestroyed()) showPet();
+}
+function openGuide() {
+  const filename = app.isPackaged ? join(process.resourcesPath,'help','使用教程.html') : join(__dirname,'../docs/使用教程.html');
+  shell.openPath(filename).then(error => { if (error) console.error('使用教程暂时无法打开。'); }).catch(() => console.error('使用教程暂时无法打开。'));
 }
 function webPreferences() { return { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false }; }
 function panelPosition(extra = false) {
@@ -199,8 +226,10 @@ function configureUpdater() {
 function menuTemplate() { return [
   { label: '记一个小念头', click: () => showQuick() },
   { label: '打开主界面', click: () => showPanel() },
+  { label: '找回小伙伴', click: () => showPet(true) },
+  { label: '使用教程', click: openGuide },
   { label: '检查软件更新', click: () => { showUpdateSettings(); updater?.check(); } },
-  { label: '显示小伙伴', type: 'checkbox', checked: petWindow?.isVisible(), click: item => item.checked ? petWindow.showInactive() : petWindow.hide() },
+  { label: '显示小伙伴', type: 'checkbox', checked: Boolean(petWindow?.isVisible()), click: item => { if (item.checked) showPet(true); else { petWantedVisible = false; petWindow?.hide(); } } },
   { label: '免打扰', type: 'checkbox', checked: settings.doNotDisturb, click: item => { settings.doNotDisturb = item.checked; saveSettings(); broadcast('settings-changed'); } },
   { type: 'separator' },
   { label: '退出小花园桌宠', click: () => { quitting = true; app.quit(); } },
@@ -285,18 +314,27 @@ if (hasLock) app.whenReady().then(async () => {
   const { createDemoStore } = await import(pathToFileURL(join(assets, 'demo.mjs')).href);
   demo = createDemoStore({ initialData: readJSON(join(dataPath, 'experience.json'), null), save: data => writeJSON(join(dataPath, 'experience.json'), data), changed: () => { broadcast('changed'); setImmediate(refreshBackground); } });
   configureClient(); installIPC();
-  const area = screen.getPrimaryDisplay().workArea;
-  petWindow = new BrowserWindow({ width: 176, height: 196, x: area.x + area.width - 192, y: area.y + area.height - 204, frame: false, transparent: true, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false, backgroundColor: '#00000000', webPreferences: webPreferences() });
+  petWindow = new BrowserWindow({ ...petPlacement(true), frame: false, transparent: true, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false, backgroundColor: '#00000000', webPreferences: webPreferences() });
+  petWindow.on('close', event => { if (!quitting) { event.preventDefault(); petWantedVisible = false; petWindow.hide(); } });
+  // Register visibility handlers before starting navigation. A second launch,
+  // monitor change or wake must also reveal/reposition an existing pet window.
+  petWindow.once('ready-to-show', () => { if (petWantedVisible) showPet(true); });
+  petWindow.webContents.on('did-finish-load', () => { if (petWantedVisible) showPet(pendingPetReset); });
+  petWindow.webContents.on('render-process-gone', () => {
+    if (quitting) return;
+    clearTimeout(petRecoveryTimer);
+    petRecoveryTimer = setTimeout(() => { if (!quitting && petWindow && !petWindow.isDestroyed()) petWindow.reload(); }, 500);
+  });
   secureWindow(petWindow, 'pet.html'); petWindow.setIgnoreMouseEvents(true, { forward: true });
   if (process.platform === 'darwin') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  petWindow.once('ready-to-show', () => petWindow.showInactive());
   // A native tray icon with no network/font dependency.
   const iconData = nativeImage.createFromPath(join(assets, 'tray.png')).resize({ width: 20, height: 20 });
   tray = new Tray(iconData);
-  tray.setToolTip('小花园桌宠'); tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())); tray.on('click', () => showQuick()); tray.on('double-click', () => showPanel()); tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
-  const registered = globalShortcut.register(shortcut, () => showQuick());
+  tray.setToolTip('小花园桌宠'); tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())); tray.on('click', () => { showPet(); showQuick(); }); tray.on('double-click', () => { showPet(); showPanel(); }); tray.on('right-click', () => tray.setContextMenu(Menu.buildFromTemplate(menuTemplate())));
+  const registered = globalShortcut.register(shortcut, () => { showPet(); showQuick(); });
   if (!registered) settings.shortcutUnavailable = true;
-  powerMonitor.on('resume', () => { restoreSession().then(() => { broadcast('changed'); startEvents(); refreshBackground(); }); });
+  for (const event of ['display-added','display-removed','display-metrics-changed']) screen.on(event,recoverPetDisplay);
+  powerMonitor.on('resume', () => { if (petWantedVisible && !petWindow.isDestroyed()) petWindow.reload(); recoverPetDisplay(); restoreSession().then(() => { broadcast('changed'); startEvents(); refreshBackground(); }); });
   const poll = setInterval(() => { restoreSession().then(() => refreshBackground()); broadcast('changed'); }, 12000); poll.unref();
   await restoreSession();
   await refreshBackground();
@@ -307,10 +345,14 @@ if (hasLock) app.whenReady().then(async () => {
   }
   if (process.env.GARDEN_COMPANION_SMOKE === '1') {
     if (petWindow.webContents.isLoading()) await once(petWindow.webContents,'did-finish-load');
-    console.log(JSON.stringify({desktopSmoke:'passed',version:app.getVersion(),platform:process.platform,arch:process.arch,petWindow:!petWindow.isDestroyed()}));
+    const petRendered = await petWindow.webContents.executeJavaScript('(async()=>{const image=document.getElementById("pet-image");await image.decode();return image.naturalWidth>0&&image.naturalHeight>0})()');
+    const bounds = petWindow.getBounds();
+    const petOnScreen = screen.getAllDisplays().some(({workArea:a}) => bounds.x>=a.x&&bounds.y>=a.y&&bounds.x+bounds.width<=a.x+a.width&&bounds.y+bounds.height<=a.y+a.height);
+    console.log(JSON.stringify({desktopSmoke:'passed',version:app.getVersion(),platform:process.platform,arch:process.arch,petWindow:!petWindow.isDestroyed(),petRendered,petVisible:petWindow.isVisible(),petOnScreen}));
     quitting=true;setTimeout(()=>app.quit(),1000);
   }
 }).catch(error => { console.error('小伙伴启动失败：', error.code || error.name); app.quit(); });
-app.on('second-instance', () => showQuick());
+app.on('second-instance', () => showPet(true));
+app.on('activate', () => showPet());
 app.on('window-all-closed', () => { /* The tray owns the lifetime. */ });
-app.on('before-quit', () => { quitting = true; updater?.close(); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });
+app.on('before-quit', () => { quitting = true; updater?.close(); clearTimeout(petRecoveryTimer); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });

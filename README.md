@@ -22,11 +22,11 @@
 
 这是一款安装在电脑上的桌面宠物软件。请选择对应安装包，使用时不需要安装 Node.js 或开发工具。
 
-| 电脑 | 下载 0.4.1 |
+| 电脑 | 下载 0.4.2 |
 | --- | --- |
-| Windows 10 / 11，x64 | [安装版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.1/Garden-Companion-0.4.1-win-x64-setup.exe) · [便携版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.1/Garden-Companion-0.4.1-win-x64-portable.exe) |
-| Mac M 系列芯片，macOS 13+ | [Apple Silicon DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.1/Garden-Companion-0.4.1-mac-arm64.dmg) |
-| Mac Intel，macOS 13+ | [Intel DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.1/Garden-Companion-0.4.1-mac-x64.dmg) |
+| Windows 10 / 11，x64 | [安装版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.2/Garden-Companion-0.4.2-win-x64-setup.exe) · [便携版 EXE](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.2/Garden-Companion-0.4.2-win-x64-portable.exe) |
+| Mac M 系列芯片，macOS 13+ | [Apple Silicon DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.2/Garden-Companion-0.4.2-mac-arm64.dmg) |
+| Mac Intel，macOS 13+ | [Intel DMG](https://github.com/Xiaoshu0553/our-garden/releases/download/v0.4.2/Garden-Companion-0.4.2-mac-x64.dmg) |
 
 Windows 安装版按向导安装；便携版直接运行。Mac 打开 DMG，将“小花园桌宠”拖入“应用程序”。默认连接共享服务器，两个人分别注册后即可用邀请码连接。
 
@@ -67,6 +67,8 @@ Windows 安装版按向导安装；便携版直接运行。Mac 打开 DMG，将�
 - **自托管**：客户端默认使用共享服务器，也能连接自己的 HTTPS 服务。
 
 ## 两个人开始使用
+
+第一次使用可以先看[图文教程](docs/使用教程.html)，软件的右键和托盘菜单也有“使用教程”入口。
 
 1. 打开桌宠，双击进入主界面，注册自己的账号。
 2. 在设置里生成伴侣邀请码，把它交给对方。

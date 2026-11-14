@@ -29,7 +29,7 @@ jobs:
             platform: win32
             arch: x64
           - name: macOS Apple Silicon
-            os: macos-15
+            os: macos-26
             platform: darwin
             arch: arm64
           - name: macOS Intel
@@ -90,6 +90,8 @@ jobs:
           $env:GARDEN_ELECTRON_EXECUTABLE = $exe
           $env:GARDEN_PACKAGED = '1'
           node desktop/test/quick.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node desktop/test/pet-recovery.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node desktop/test/e2e.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

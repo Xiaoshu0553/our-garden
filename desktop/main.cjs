@@ -138,7 +138,7 @@ function recoverPetDisplay() {
   if (petWantedVisible && petWindow && !petWindow.isDestroyed()) showPet();
 }
 function openGuide() {
-  const filename = app.isPackaged ? join(process.resourcesPath,'help','使用教程.html') : join(__dirname,'../docs/使用教程.html');
+  const filename = app.isPackaged ? join(process.resourcesPath,'help','guide.html') : join(__dirname,'../docs/guide.html');
   shell.openPath(filename).then(error => { if (error) console.error('使用教程暂时无法打开。'); }).catch(() => console.error('使用教程暂时无法打开。'));
 }
 function webPreferences() { return { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false }; }

@@ -119,7 +119,7 @@ try {
 
   const screenshot = join(profile, 'pet-recovered.png');
   await pet.screenshot({ path: screenshot });
-  const guidePath = process.env.GARDEN_PACKAGED === '1' ? join(await application.evaluate(() => process.resourcesPath), 'help/使用教程.html') : join(root,'docs/使用教程.html');
+  const guidePath = process.env.GARDEN_PACKAGED === '1' ? join(await application.evaluate(() => process.resourcesPath), 'help/guide.html') : join(root,'docs/guide.html');
   const guide = await application.evaluate(async ({BrowserWindow},filename) => {
     const window = new BrowserWindow({show:false,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});
     try {

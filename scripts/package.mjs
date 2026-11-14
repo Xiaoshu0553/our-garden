@@ -20,7 +20,7 @@ if (args.length && (args.length !== 2 || args[0] !== '--output')) {
     for (const file of [...files, 'public/app.js', 'scripts/accounts.mjs']) await stat(resolve(root, file));
     await mkdir(dirname(destination), { recursive: true });
     const result = spawnSync('tar', ['-czf', destination, ...files], { cwd: root, encoding: 'utf8' });
-    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || '打包失败。');
+    if (result.error || result.status !== 0) throw new Error(result.error?.message || result.stderr || `tar 打包失败（退出状态 ${result.status}）。`);
     const listing = spawnSync('tar', ['-tzf', destination], { encoding: 'utf8' });
     if (listing.error || listing.status !== 0) throw new Error('无法检查发布包。');
     const entries = listing.stdout.split(/\r?\n/).filter(Boolean);

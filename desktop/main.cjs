@@ -18,7 +18,7 @@ if (process.env.GARDEN_COMPANION_TEST === '1') {
 }
 const hasLock = process.env.GARDEN_COMPANION_TEST === '1' || app.requestSingleInstanceLock();
 if (!hasLock) app.quit();
-let petWindow, primaryWindow, quickWindow, tray, demo, client;
+let petWindow, primaryWindow, quickWindow, guideWindow, tray, demo, client;
 let quitting = false;
 let unreadCount = 0;
 let settings;
@@ -138,8 +138,27 @@ function recoverPetDisplay() {
   if (petWantedVisible && petWindow && !petWindow.isDestroyed()) showPet();
 }
 function openGuide() {
+  if (quitting) return;
+  if (!app.isReady()) { app.whenReady().then(openGuide); return; }
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const width = Math.min(1040,area.width-32), height = Math.min(840,area.height-48);
+  const bounds = {width,height,x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2)};
+  if (guideWindow && !guideWindow.isDestroyed()) { guideWindow.setBounds(bounds);if(guideWindow.isMinimized())guideWindow.restore();guideWindow.show();guideWindow.focus();return; }
   const filename = app.isPackaged ? join(process.resourcesPath,'help','guide.html') : join(__dirname,'../docs/guide.html');
-  shell.openPath(filename).then(error => { if (error) console.error('使用教程暂时无法打开。'); }).catch(() => console.error('使用教程暂时无法打开。'));
+  const allowed = pathToFileURL(filename).href;
+  const images = new URL('images/',allowed).href;
+  const window = new BrowserWindow({...bounds,show:false,title:'小花园 · 使用教程',alwaysOnTop:true,autoHideMenuBar:true,backgroundColor:'#f7f7ee',webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true,spellcheck:false}});
+  guideWindow = window; window.setMenu(null);
+  function external(url) { try { const value=new URL(url); if(value.protocol==='https:'&&['github.com','cyberhome.wuhuxiaoshu.com'].includes(value.hostname))shell.openExternal(value.href).catch(()=>{}); } catch { /* Only documented HTTPS links can leave the guide. */ } }
+  window.webContents.on('will-navigate',(event,url)=>{if(url.split('#')[0]!==allowed){event.preventDefault();external(url);}});
+  window.webContents.setWindowOpenHandler(({url})=>{
+    if(url.startsWith(images)&&/\.(png|svg)(?:#.*)?$/i.test(url))return{action:'allow',overrideBrowserWindowOptions:{width:900,height:760,parent:window,alwaysOnTop:true,autoHideMenuBar:true,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}}};
+    external(url);return{action:'deny'};
+  });
+  window.webContents.session.setPermissionRequestHandler((_contents,_permission,callback)=>callback(false));
+  window.once('ready-to-show',()=>{if(!window.isDestroyed()){window.show();window.focus();}});
+  window.on('closed',()=>{if(guideWindow===window)guideWindow=null;});
+  window.loadFile(filename).catch(()=>{if(!window.isDestroyed())window.destroy();console.error('内置教程暂时无法打开。');});
 }
 function webPreferences() { return { preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, spellcheck: false }; }
 function panelPosition(extra = false) {
@@ -244,6 +263,7 @@ function installIPC() {
     });
   }
   handle('garden:info', sender => info(sender));
+  handle('garden:help',()=>{openGuide();return{opened:true};});
   handle('garden:update', async (_sender, action = 'status') => {
     if (action === 'status') return updater.snapshot();
     if (action === 'check') return updater.check();
@@ -264,7 +284,7 @@ function installIPC() {
     if (!value || !['demo', 'connected'].includes(value.mode)) throw new Error('请选择连接方式。');
     if (value.mode === 'connected') settings.serverUrl = serverOrigin(value.serverUrl);
     settings.mode = value.mode; unreadCount = 0; pendingNotices.clear(); saveSettings(); configureClient(); configureUpdater(); updatePet();
-    for (const window of BrowserWindow.getAllWindows()) if (window !== primaryWindow && window !== petWindow && window !== quickWindow) window.destroy();
+    for (const window of BrowserWindow.getAllWindows()) if (window !== primaryWindow && window !== petWindow && window !== quickWindow && window !== guideWindow) window.destroy();
     if (settings.mode === 'demo') refreshBackground();
     broadcast('connection-changed', { sourceId: sender.id });
     return info(sender);
@@ -327,6 +347,7 @@ if (hasLock) app.whenReady().then(async () => {
   });
   secureWindow(petWindow, 'pet.html'); petWindow.setIgnoreMouseEvents(true, { forward: true });
   if (process.platform === 'darwin') petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (process.argv.includes('--guide')) openGuide();
   // A native tray icon with no network/font dependency.
   const iconData = nativeImage.createFromPath(join(assets, 'tray.png')).resize({ width: 20, height: 20 });
   tray = new Tray(iconData);
@@ -352,7 +373,7 @@ if (hasLock) app.whenReady().then(async () => {
     quitting=true;setTimeout(()=>app.quit(),1000);
   }
 }).catch(error => { console.error('小伙伴启动失败：', error.code || error.name); app.quit(); });
-app.on('second-instance', () => showPet(true));
+app.on('second-instance', (_event,args=[]) => { showPet(true); if(args.includes('--guide'))openGuide(); });
 app.on('activate', () => showPet());
 app.on('window-all-closed', () => { /* The tray owns the lifetime. */ });
 app.on('before-quit', () => { quitting = true; updater?.close(); clearTimeout(petRecoveryTimer); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });

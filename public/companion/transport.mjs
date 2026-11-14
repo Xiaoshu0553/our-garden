@@ -7,6 +7,7 @@ export async function createTransport(onChange) {
     return {
       desktop: true,
       info: () => desktop.info(),
+      help: () => desktop.openGuide(),
       update: action => desktop.update(action),
       request: (path, method = 'GET', body) => desktop.request(path, method, body),
       settings: value => desktop.settings(value),

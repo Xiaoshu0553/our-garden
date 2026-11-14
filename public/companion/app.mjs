@@ -152,6 +152,7 @@ function render() {
   const item = selected();
   content.innerHTML = state.page === 'archive' && state.archiveData ? renderArchive(state.archiveData) : state.page === 'new-goal' ? renderGoalProposal() : state.page === 'settings' ? renderSettings() : state.page === 'queue' ? renderQueue() : item ? renderDetail(item) : state.page === 'talk' ? renderTalk() : renderList();
   if (state.page === 'settings' && transport.desktop) content.insertAdjacentHTML('beforeend', renderSoftwareUpdate());
+  if (state.page === 'settings' && transport.desktop) content.querySelector('.settings-title')?.insertAdjacentHTML('afterend','<div class="form-actions"><button type="button" class="btn soft tiny" data-action="help">使用教程 · 第一次从这里开始</button></div>');
 }
 function page(value) { state.page = value; state.selected = null; state.suggestion = ''; state.filter = 'all'; state.search = ''; render(); content.scrollTop = 0; }
 async function openIdea(id) {
@@ -252,6 +253,7 @@ async function action(target) {
   const item = selected();
   switch (target.dataset.action) {
     case 'main': return transport.main();
+    case 'help': return transport.help();
     case 'update-settings': page('settings'); document.getElementById('software-update')?.scrollIntoView({block:'center'}); return;
     case 'update-check': state.info.update = await transport.update('check'); refreshUpdate(); return;
     case 'update-install': state.info.update = await transport.update('install'); refreshUpdate(); return;

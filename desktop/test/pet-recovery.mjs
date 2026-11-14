@@ -30,9 +30,11 @@ async function eventually(check, timeout = 12000) {
 }
 async function snapshot() {
   return application.evaluate(({ BrowserWindow, screen }) => ({
-    windows: BrowserWindow.getAllWindows().map(window => ({ title: window.getTitle(), visible: window.isVisible(), minimized: window.isMinimized(), bounds: window.getBounds() })),
+    windows: BrowserWindow.getAllWindows().map(window => ({ title: window.getTitle(), visible: window.isVisible(), minimized: window.isMinimized(), alwaysOnTop: window.isAlwaysOnTop(), bounds: window.getBounds() })),
     workAreas: screen.getAllDisplays().map(display => display.workArea),
     cursorWorkArea: screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea,
+    focusedWindow: BrowserWindow.getFocusedWindow()?.getTitle() || null,
+    petFocusEvents: globalThis.gardenRecoveryPetFocusEvents || [],
   }));
 }
 const contains = (area, bounds) => bounds.x >= area.x && bounds.y >= area.y && bounds.x + bounds.width <= area.x + area.width && bounds.y + bounds.height <= area.y + area.height;
@@ -42,8 +44,11 @@ async function recovered({ cursorDisplay = false } = {}) {
     const pet = state.windows.find(window => window.title === '小花园桌宠');
     assert.ok(pet?.visible, '找回操作应重新显示宠物');
     assert.equal(pet.minimized, false);
+    assert.equal(pet.alwaysOnTop, true);
     assert.ok((cursorDisplay ? [state.cursorWorkArea] : state.workAreas).some(area => contains(area, pet.bounds)), '宠物应完整位于可见显示器的工作区内');
-    assert.equal(state.windows.filter(window => window.title !== '小花园桌宠' && window.visible).length, 0, '找回宠物不应自动弹出快捷卡片或主界面');
+    const area = state.workAreas.find(area => contains(area, pet.bounds));
+    assert.ok(Math.abs(pet.bounds.width - Math.min(176, area.width)) <= 1 && Math.abs(pet.bounds.height - Math.min(196, area.height)) <= 1, '找回后宠物尺寸应恢复为176×196 DIP');
+    assert.equal(state.windows.filter(window => !['小花园桌宠', 'Desktop QA focus sentinel'].includes(window.title) && window.visible).length, 0, '找回宠物不应自动弹出快捷卡片或主界面');
     return state;
   });
 }
@@ -62,6 +67,38 @@ try {
   await recovered();
   console.log('PASS: startup displays a rendered pet without opening a panel.');
 
+  await application.evaluate(({ BrowserWindow, screen }) => {
+    const pet = BrowserWindow.getAllWindows().find(window => window.getTitle() === '小花园桌宠');
+    globalThis.gardenRecoveryPetFocusEvents = [];
+    pet.on('focus', () => globalThis.gardenRecoveryPetFocusEvents.push(Date.now()));
+    const area = screen.getPrimaryDisplay().workArea;
+    globalThis.gardenRecoverySentinel = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 320, height: 180, title: 'Desktop QA focus sentinel', show: true, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+    globalThis.gardenRecoverySentinel.focus();
+  });
+  await eventually(async () => assert.equal((await snapshot()).focusedWindow, 'Desktop QA focus sentinel'));
+  const automaticRecovery = {};
+  for (const action of ['hide', 'minimize', 'topmost-loss']) {
+    const immediate = await application.evaluate(({ BrowserWindow }, action) => {
+      const pet = BrowserWindow.getAllWindows().find(window => window.getTitle() === '小花园桌宠');
+      globalThis.gardenRecoverySentinel.focus();
+      globalThis.gardenRecoveryPetFocusEvents = [];
+      if (action === 'hide') pet.hide();
+      if (action === 'minimize') { pet.setSize(110, 123); pet.minimize(); }
+      if (action === 'topmost-loss') pet.setAlwaysOnTop(false);
+      return { visible: pet.isVisible(), minimized: pet.isMinimized(), alwaysOnTop: pet.isAlwaysOnTop() };
+    }, action);
+    if (action === 'hide') assert.equal(immediate.visible, false);
+    if (action === 'minimize') assert.equal(immediate.minimized, true);
+    if (action === 'topmost-loss') assert.equal(immediate.alwaysOnTop, false);
+    automaticRecovery[action] = await recovered();
+    await pet.waitForTimeout(100);
+    const focus = await snapshot();
+    assert.deepEqual(focus.petFocusEvents, [], `${action}: automatic pet recovery must never focus the pet`);
+    assert.equal(focus.focusedWindow, 'Desktop QA focus sentinel', `${action}: the previously focused app should retain focus`);
+    console.log(`PASS: unexpected ${action} recovers automatically at full size without panels or focus theft.`);
+  }
+  await application.evaluate(() => { globalThis.gardenRecoverySentinel.destroy(); delete globalThis.gardenRecoverySentinel; });
+
   await losePet(true);
   await application.evaluate(({ app }, root) => app.emit('second-instance', {}, [], root), root);
   const relaunch = await recovered({ cursorDisplay: true });
@@ -69,6 +106,8 @@ try {
 
   await application.evaluate(({BrowserWindow}) => BrowserWindow.getAllWindows().find(window=>window.getTitle()==='小花园桌宠').close());
   await eventually(async()=>assert.equal((await snapshot()).windows.find(window=>window.title==='小花园桌宠')?.visible,false));
+  await pet.waitForTimeout(750);
+  assert.equal((await snapshot()).windows.find(window => window.title === '小花园桌宠')?.visible, false, '用户主动关闭后不应被自动恢复');
   await application.evaluate(({app},root)=>app.emit('second-instance',{},[],root),root);
   await recovered({cursorDisplay:true});
   console.log('PASS: closing the pet keeps it recoverable from the running app.');
@@ -87,6 +126,18 @@ try {
   await eventually(async () => assert.ok(await application.evaluate(() => globalThis.gardenRecoveryMenu?.items.some(item => item.label === '找回小伙伴')), '菜单应提供找回小伙伴入口'));
   await application.evaluate(() => globalThis.gardenRecoveryMenu.items.find(item => item.label === '找回小伙伴').click());
   const menuRecovery = await recovered({ cursorDisplay: true });
+  await pet.evaluate(() => window.gardenDesktop.petMenu());
+  const menuHide = await application.evaluate(() => {
+    const item = globalThis.gardenRecoveryMenu.items.find(item => item.label === '显示小伙伴');
+    // Electron's MenuItem.click wrapper toggles a checkbox just like a native click.
+    const before = item.checked; item.click();
+    return { before, after: item.checked };
+  });
+  assert.deepEqual(menuHide, { before: true, after: false });
+  await pet.waitForTimeout(750);
+  assert.equal((await snapshot()).windows.find(window => window.title === '小花园桌宠')?.visible, false, '菜单主动隐藏后不应被自动恢复');
+  await application.evaluate(({ app }, root) => app.emit('second-instance', {}, [], root), root);
+  await recovered({ cursorDisplay: true });
   await application.evaluate(({ Menu }) => { Menu.prototype.popup = globalThis.gardenRecoveryOriginalPopup; });
   console.log('PASS: the recovery menu restores and repositions the pet.');
 
@@ -130,7 +181,11 @@ try {
   assert.ok(guide.title.includes('使用教程'));assert.ok(guide.images>=3);assert.equal(guide.allImagesRendered,true);assert.equal(guide.brokenAnchors,0);
   console.log('PASS: the bundled offline guide loads with images and working navigation.');
   assert.deepEqual(errors, []);
-  const report = { result: 'passed', profile, screenshot, relaunch, displayChange, menuRecovery, negativeDisplayRecovery, guide, errors };
+  const report = { result: 'passed', profile, screenshot, automaticRecovery, relaunch, displayChange, menuRecovery, negativeDisplayRecovery, guide, errors };
   await writeFile(join(profile, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
+} catch (error) {
+  await writeFile(join(profile, 'report.json'), JSON.stringify({ result: 'failed', profile, error: error.stack, state: await snapshot(), errors }, null, 2));
+  console.error(`Recovery failure evidence: ${join(profile, 'report.json')}`);
+  throw error;
 } finally { await application.close(); }

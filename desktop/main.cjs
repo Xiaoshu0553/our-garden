@@ -33,6 +33,7 @@ let lastUpdateNotice = '';
 let petWantedVisible = true;
 let pendingPetReset = true;
 let petRecoveryTimer;
+let petVisibilityTimer, petPaintTimer;
 const panelUsers = new Map();
 const windowModes = new Map();
 const pendingNotices = new Set();
@@ -119,8 +120,13 @@ function secureWindow(window, filename) {
 }
 function petPlacement(resetPosition = false) {
   const current = petWindow?.getBounds();
-  if (current && !resetPosition && screen.getAllDisplays().some(({ workArea: a }) =>
-    current.x >= a.x && current.y >= a.y && current.x + current.width <= a.x + a.width && current.y + current.height <= a.y + a.height)) return current;
+  if (current && !resetPosition) {
+    const display = screen.getAllDisplays().find(({workArea:a}) => current.x >= a.x && current.y >= a.y && current.x < a.x+a.width && current.y < a.y+a.height);
+    if (display) {
+      const a=display.workArea, width=Math.min(176,a.width), height=Math.min(196,a.height);
+      return {width,height,x:Math.min(current.x,a.x+a.width-width),y:Math.min(current.y,a.y+a.height-height)};
+    }
+  }
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const width = Math.min(176, area.width), height = Math.min(196, area.height);
   return { width, height, x: area.x + Math.max(0, area.width - width - 16), y: area.y + Math.max(0, area.height - height - 8) };
@@ -129,13 +135,37 @@ function showPet(resetPosition = false) {
   petWantedVisible = true;
   pendingPetReset ||= resetPosition;
   if (!petWindow || petWindow.isDestroyed() || quitting) return;
+  // On Windows restore() deactivates the foreground app even for a non-focusable
+  // pet. showInactive() also unminimizes it, while preserving keyboard focus.
+  if (petWindow.isMinimized()) {
+    if (process.platform === 'win32') petWindow.showInactive();
+    else petWindow.restore();
+  }
   petWindow.setBounds(petPlacement(pendingPetReset)); pendingPetReset = false;
-  if (petWindow.isMinimized()) petWindow.restore();
-  petWindow.setAlwaysOnTop(true);
+  // Windows' floating level is inserted behind the taskbar. A shell overlay
+  // can leave that taskbar non-topmost, demoting the pet along with it.
+  petWindow.setAlwaysOnTop(true,process.platform==='win32'?'pop-up-menu':'floating');
   petWindow.showInactive(); petWindow.moveTop(); updatePet();
+  schedulePetPaint();
 }
 function recoverPetDisplay() {
   if (petWantedVisible && petWindow && !petWindow.isDestroyed()) showPet();
+}
+function schedulePetPaint() {
+  clearTimeout(petPaintTimer);
+  petPaintTimer=setTimeout(()=>{
+    if (!quitting && petWantedVisible && petWindow && !petWindow.isDestroyed() && petWindow.isVisible() && !petWindow.webContents.isDestroyed()) petWindow.webContents.invalidate();
+  },150);
+  petPaintTimer.unref();
+}
+function schedulePetVisibilityRecovery() {
+  clearTimeout(petVisibilityTimer);
+  if (quitting || !petWantedVisible) return;
+  petVisibilityTimer=setTimeout(()=>{
+    if (!quitting && petWantedVisible && petWindow && !petWindow.isDestroyed() &&
+        (!petWindow.isVisible() || petWindow.isMinimized() || !petWindow.isAlwaysOnTop())) showPet();
+  },250);
+  petVisibilityTimer.unref();
 }
 function openGuide() {
   if (quitting) return;
@@ -334,8 +364,14 @@ if (hasLock) app.whenReady().then(async () => {
   const { createDemoStore } = await import(pathToFileURL(join(assets, 'demo.mjs')).href);
   demo = createDemoStore({ initialData: readJSON(join(dataPath, 'experience.json'), null), save: data => writeJSON(join(dataPath, 'experience.json'), data), changed: () => { broadcast('changed'); setImmediate(refreshBackground); } });
   configureClient(); installIPC();
-  petWindow = new BrowserWindow({ ...petPlacement(true), frame: false, transparent: true, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false, backgroundColor: '#00000000', webPreferences: webPreferences() });
+  // The animated, transparent pet must keep painting while a system overlay
+  // temporarily covers it. Other app windows retain normal background throttling.
+  petWindow = new BrowserWindow({ ...petPlacement(true), frame: false, transparent: true, resizable: false, show: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false, backgroundColor: '#00000000', webPreferences: {...webPreferences(),backgroundThrottling:false} });
   petWindow.on('close', event => { if (!quitting) { event.preventDefault(); petWantedVisible = false; petWindow.hide(); } });
+  for (const event of ['hide','minimize']) petWindow.on(event,schedulePetVisibilityRecovery);
+  petWindow.on('always-on-top-changed',(_event,onTop)=>{if(!onTop)schedulePetVisibilityRecovery();});
+  for (const event of ['show','restore','focus','blur']) petWindow.on(event,schedulePetPaint);
+  if (process.platform==='win32') petWindow.hookWindowMessage(0x031E,schedulePetPaint); // WM_DWMCOMPOSITIONCHANGED
   // Register visibility handlers before starting navigation. A second launch,
   // monitor change or wake must also reveal/reposition an existing pet window.
   petWindow.once('ready-to-show', () => { if (petWantedVisible) showPet(true); });
@@ -356,6 +392,7 @@ if (hasLock) app.whenReady().then(async () => {
   if (!registered) settings.shortcutUnavailable = true;
   for (const event of ['display-added','display-removed','display-metrics-changed']) screen.on(event,recoverPetDisplay);
   powerMonitor.on('resume', () => { if (petWantedVisible && !petWindow.isDestroyed()) petWindow.reload(); recoverPetDisplay(); restoreSession().then(() => { broadcast('changed'); startEvents(); refreshBackground(); }); });
+  powerMonitor.on('unlock-screen',recoverPetDisplay);
   const poll = setInterval(() => { restoreSession().then(() => refreshBackground()); broadcast('changed'); }, 12000); poll.unref();
   await restoreSession();
   await refreshBackground();
@@ -376,4 +413,4 @@ if (hasLock) app.whenReady().then(async () => {
 app.on('second-instance', (_event,args=[]) => { showPet(true); if(args.includes('--guide'))openGuide(); });
 app.on('activate', () => showPet());
 app.on('window-all-closed', () => { /* The tray owns the lifetime. */ });
-app.on('before-quit', () => { quitting = true; updater?.close(); clearTimeout(petRecoveryTimer); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });
+app.on('before-quit', () => { quitting = true; updater?.close(); clearTimeout(petRecoveryTimer); clearTimeout(petVisibilityTimer); clearTimeout(petPaintTimer); clearInterval(updateTimer); eventsController?.abort(); clearTimeout(eventsTimer); if (app.isReady()) globalShortcut.unregisterAll(); if (tray && !tray.isDestroyed()) tray.destroy(); });

@@ -10,10 +10,10 @@
 
 | 电脑 | 文件 |
 | --- | --- |
-| Windows x64 安装版 | `Garden-Companion-0.4.2-win-x64-setup.exe` |
-| Windows x64 便携版 | `Garden-Companion-0.4.2-win-x64-portable.exe` |
-| Mac M 系列芯片 | `Garden-Companion-0.4.2-mac-arm64.dmg` |
-| Mac Intel | `Garden-Companion-0.4.2-mac-x64.dmg` |
+| Windows x64 安装版 | `Garden-Companion-0.4.3-win-x64-setup.exe` |
+| Windows x64 便携版 | `Garden-Companion-0.4.3-win-x64-portable.exe` |
+| Mac M 系列芯片 | `Garden-Companion-0.4.3-mac-arm64.dmg` |
+| Mac Intel | `Garden-Companion-0.4.3-mac-x64.dmg` |
 
 Windows 安装版按向导安装，便携版直接运行。Mac 需要 macOS 13+，打开 DMG 后，将“小花园桌宠”拖入“应用程序”。软件本身不需要另外安装 Node.js。首次从旧版升级前，请从旧版宠物的右键菜单退出旧版。
 

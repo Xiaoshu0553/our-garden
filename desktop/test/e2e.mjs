@@ -66,6 +66,16 @@ try {
   const experience = await launch(experienceProfile);
   await experience.panel.locator('#idea-input').waitFor();
   await experience.panel.locator('#settings-button').click();
+  await experience.panel.locator('[data-setting=doNotDisturb]').focus();
+  await experience.panel.locator('[data-setting=doNotDisturb]').press('Space');
+  await eventually(async () => {
+    assert.equal(await experience.panel.locator('[data-setting=doNotDisturb]').isChecked(), true);
+    assert.equal(await experience.panel.evaluate(() => document.activeElement?.dataset.setting), 'doNotDisturb');
+  });
+  const imageChooser = experience.panel.waitForEvent('filechooser');
+  await experience.panel.locator('[data-action=choose-pet-image]').focus();
+  await experience.panel.locator('[data-action=choose-pet-image]').press('Enter');
+  await (await imageChooser).setFiles([]);
   await experience.panel.locator('[data-action=pet][data-pet=cat]').click();
   await experience.panel.locator('[data-action=peer-window]').click();
   const peerPanel = await eventually(() => { const page = experience.app.windows().find(page => page !== experience.panel && page.url().endsWith('/index.html')); assert.ok(page); return page; });
@@ -151,14 +161,15 @@ try {
   // The server announcement checks metadata; it must leave an active draft intact.
   await a.panel.locator('.nav-button[data-page=talk]').click();
   await a.panel.locator('#idea-input').fill('更新提醒到来时，这份草稿仍在。');
-  const version='0.4.3';
+  const currentVersion=(await a.panel.evaluate(()=>window.gardenDesktop.info())).version.split('.').map(Number);
+  const version=[currentVersion[0],currentVersion[1],currentVersion[2]+1].join('.');
   await writeFile(join(run,'service/desktop-release.json'),JSON.stringify({schemaVersion:1,version,publishedAt:new Date().toISOString(),notes:'测试服务器更新提醒。',assets:Object.fromEntries(Object.entries(contract.assetSuffixes).map(([key,suffix])=>[key,{url:`${contract.source}/releases/download/v${version}/Garden-Companion-${version}-${suffix}`,sha256:'a'.repeat(64),size:100}]))}));
   await a.panel.locator('.update-notice').waitFor();
   assert.equal(await a.panel.locator('#idea-input').inputValue(),'更新提醒到来时，这份草稿仍在。');
   assert.equal((await a.panel.evaluate(()=>window.gardenDesktop.update('status'))).status,'available');
   await a.panel.locator('.update-notice').click();
   await a.panel.locator('#software-update').waitFor();
-  assert.match(await a.panel.locator('#software-update').innerText(),/0\.4\.3/);
+  assert.ok((await a.panel.locator('#software-update').innerText()).includes(version));
   console.log('PASS: server software update notification preserves drafts and waits for user download.');
 
   await a.panel.getByRole('button',{name:'解除伴侣绑定',exact:true}).click();
